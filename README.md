@@ -63,7 +63,7 @@ go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ### Production Build
 
 ```bash
-cd dmailsender2
+cd dmailsender
 wails build
 ```
 
@@ -91,7 +91,7 @@ wails build -clean
 ## Project Structure
 
 ```
-dmailsender2/
+dmailsender/
 ├── main.go                    # Wails 앱 진입점, 윈도우 설정
 ├── app.go                     # AppService: 프론트엔드 바인딩 브릿지
 ├── core/
