@@ -113,6 +113,16 @@ dmailsender/
 └── wails.json
 ```
 
+## macOS Note
+
+macOS에서 다운로드한 앱 실행 시 "손상되었습니다" 메시지가 나타나면, 터미널에서 다음 명령을 실행하세요:
+
+```bash
+xattr -cr dMailSender.app
+```
+
+이후 우클릭 → 열기로 실행할 수 있습니다.
+
 ## Configuration
 
 설정 파일 위치:

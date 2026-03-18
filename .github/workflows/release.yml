@@ -49,9 +49,10 @@ jobs:
       - name: Build
         run: wails build
 
-      - name: Package macOS app
+      - name: Sign and package macOS app
         if: runner.os == 'macOS'
         run: |
+          codesign --force --deep -s - build/bin/dMailSender.app
           cd build/bin
           zip -r ../../${{ matrix.artifact }} dMailSender.app
 
