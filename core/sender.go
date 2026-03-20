@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime"
 	"net"
+	netmail "net/mail"
 	"regexp"
 	"strconv"
 	"strings"
@@ -210,38 +211,77 @@ func (l *smtpLogger) Errorf(entry gomaillog.Log) {
 	l.log("error", entry)
 }
 
+// extractAddr extracts the bare email address from a header value like "Display Name <addr@example.com>".
+// If parsing fails, returns the original string as-is.
+func extractAddr(raw string) string {
+	addr, err := netmail.ParseAddress(raw)
+	if err != nil {
+		// Fallback: return trimmed original
+		return strings.TrimSpace(raw)
+	}
+	return addr.Address
+}
+
 // SendEML sends an .eml file via SMTP using EMLToMsgFromFile.
-// The from/rcpt parameters override the SMTP envelope addresses.
-func SendEML(server ServerConfig, password string, from, rcpt, emlPath string, useHeaderEnvelope bool, updateMessageID bool, customHeaders []Header, onLog func(direction, line string)) error {
+// Returns the actual from/to addresses used for sending (for accurate logging).
+// When useHeaderEnvelope=true, the EML's own From/To headers are used as SMTP envelope addresses.
+// When useHeaderEnvelope=false, the from/rcpt parameters override the SMTP envelope addresses.
+func SendEML(server ServerConfig, password string, from, rcpt, emlPath string, useHeaderEnvelope bool, updateMessageID bool, customHeaders []Header, onLog func(direction, line string)) (usedFrom, usedTo string, err error) {
 	if onLog != nil {
 		onLog("info", fmt.Sprintf("Parsing EML file: %s", emlPath))
 	}
 
 	m, err := gomail.EMLToMsgFromFile(emlPath)
 	if err != nil {
-		return fmt.Errorf("failed to parse EML file: %w", err)
+		return "", "", fmt.Errorf("failed to parse EML file: %w", err)
 	}
 
-	if onLog != nil {
-		onLog("info", fmt.Sprintf("EML parsed OK — From override: %q, To override: %q", from, rcpt))
-	}
+	if useHeaderEnvelope {
+		// Use EML header From/To as SMTP envelope addresses (no UI override)
+		// - From header → extract bare address → set as EnvelopeFrom (MAIL FROM)
+		// - To header → keep as-is (go-mail uses it for RCPT TO automatically)
+		emlFrom := ""
+		emlTo := ""
+		if addrs := m.GetFromString(); len(addrs) > 0 {
+			emlFrom = extractAddr(addrs[0])
+		}
+		if addrs := m.GetToString(); len(addrs) > 0 {
+			emlTo = extractAddr(addrs[0])
+		}
 
-	// Override envelope sender/recipient with user-provided values
-	if from != "" {
-		if useHeaderEnvelope {
-			if err := m.EnvelopeFrom(from); err != nil {
-				return fmt.Errorf("invalid envelope from: %w", err)
+		if onLog != nil {
+			onLog("info", fmt.Sprintf("EML parsed OK — Using header envelope: From=%q, To=%q", emlFrom, emlTo))
+		}
+
+		// Set envelope sender from EML header (bare address for SMTP MAIL FROM)
+		if emlFrom != "" {
+			if err := m.EnvelopeFrom(emlFrom); err != nil {
+				return "", "", fmt.Errorf("invalid EML header From for envelope: %w", err)
 			}
-		} else {
+		}
+		// To header is not overridden — go-mail uses the EML's original To for RCPT TO
+
+		usedFrom = emlFrom
+		usedTo = emlTo
+	} else {
+		// Override with user-provided values
+		if onLog != nil {
+			onLog("info", fmt.Sprintf("EML parsed OK — From override: %q, To override: %q", from, rcpt))
+		}
+
+		if from != "" {
 			if err := m.From(from); err != nil {
-				return fmt.Errorf("invalid from: %w", err)
+				return "", "", fmt.Errorf("invalid from: %w", err)
 			}
 		}
-	}
-	if rcpt != "" {
-		if err := m.To(rcpt); err != nil {
-			return fmt.Errorf("invalid to: %w", err)
+		if rcpt != "" {
+			if err := m.To(rcpt); err != nil {
+				return "", "", fmt.Errorf("invalid to: %w", err)
+			}
 		}
+
+		usedFrom = from
+		usedTo = rcpt
 	}
 
 	if updateMessageID {
@@ -260,7 +300,7 @@ func SendEML(server ServerConfig, password string, from, rcpt, emlPath string, u
 
 	client, err := gomail.NewClient(server.SMTP, opts...)
 	if err != nil {
-		return fmt.Errorf("failed to create SMTP client: %w", err)
+		return "", "", fmt.Errorf("failed to create SMTP client: %w", err)
 	}
 
 	if onLog != nil {
@@ -268,10 +308,10 @@ func SendEML(server ServerConfig, password string, from, rcpt, emlPath string, u
 	}
 
 	if err := client.DialAndSend(m); err != nil {
-		return fmt.Errorf("send failed: %w", err)
+		return "", "", fmt.Errorf("send failed: %w", err)
 	}
 
-	return nil
+	return usedFrom, usedTo, nil
 }
 
 // buildClientOpts creates common go-mail client options from server config.

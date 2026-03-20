@@ -512,12 +512,17 @@ function App() {
                     <input
                       type="checkbox"
                       checked={config.mail.use_header_envelope}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          if (!window.confirm('헤더 발신자/수신자 정보를 사용하여 메일을 전송합니다.\n의도하지 않은 주소로 발송될 수 있으니 주의가 필요합니다.\n\n진행하시겠습니까?')) {
+                            return;
+                          }
+                        }
                         setConfig(new core.AppConfig({
                           ...config,
                           mail: new core.MailConfig({ ...config.mail, use_header_envelope: e.target.checked }),
-                        }))
-                      }
+                        }));
+                      }}
                     />
                     <span className="slider" />
                   </label>

@@ -179,12 +179,21 @@ func StartSendEML(
 				actualRcpt = applyNumbering(rcpt, idx)
 			}
 
-			err := SendEML(server, password, actualFrom, actualRcpt, path, useHeaderEnvelope, updateMessageID, customHeaders, onLog)
+			usedFrom, usedTo, err := SendEML(server, password, actualFrom, actualRcpt, path, useHeaderEnvelope, updateMessageID, customHeaders, onLog)
+			// Use the actual addresses returned by SendEML for accurate logging
+			resultFrom := actualFrom
+			resultTo := actualRcpt
+			if useHeaderEnvelope && usedFrom != "" {
+				resultFrom = usedFrom
+			}
+			if useHeaderEnvelope && usedTo != "" {
+				resultTo = usedTo
+			}
 			result := SendResult{
 				Index:   idx,
 				Success: err == nil,
-				From:    actualFrom,
-				To:      actualRcpt,
+				From:    resultFrom,
+				To:      resultTo,
 				Subject: filepath.Base(path),
 			}
 			if err != nil {
