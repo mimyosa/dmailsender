@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"dMailSender/core"
 
@@ -85,6 +86,15 @@ func (a *AppService) SavePassword(authID, password string) error {
 // LoadPassword retrieves a password from the OS keychain.
 func (a *AppService) LoadPassword(authID string) (string, error) {
 	return core.LoadPassword(authID)
+}
+
+// HasPassword checks whether a password exists in the OS keychain for the given auth ID.
+func (a *AppService) HasPassword(authID string) bool {
+	if authID == "" {
+		return false
+	}
+	pw, err := core.LoadPassword(authID)
+	return err == nil && pw != ""
 }
 
 // --- Load Config From File ---
@@ -200,12 +210,12 @@ func (a *AppService) StartSend() error {
 			a.mu.Unlock()
 		}()
 
-		var lastSent, lastFailed int
+		var lastSent, lastFailed atomic.Int64
 
 		core.StartSend(ctx, serverCfg, password, mailCfg, attachCopy,
 			func(p core.ProgressEvent) {
-				lastSent = p.Sent
-				lastFailed = p.Failed
+				lastSent.Store(int64(p.Sent))
+				lastFailed.Store(int64(p.Failed))
 				runtime.EventsEmit(a.ctx, "progress", p)
 			},
 			func(r core.SendResult) {
@@ -220,8 +230,8 @@ func (a *AppService) StartSend() error {
 		)
 
 		runtime.EventsEmit(a.ctx, "done", map[string]int{
-			"success": lastSent,
-			"failed":  lastFailed,
+			"success": int(lastSent.Load()),
+			"failed":  int(lastFailed.Load()),
 			"total":   mailCfg.MailNumber,
 		})
 	}()
@@ -291,7 +301,7 @@ func (a *AppService) StartSendEML(emlFiles []string, from, rcpt string, numberin
 			a.mu.Unlock()
 		}()
 
-		var lastSent, lastFailed int
+		var lastSent, lastFailed atomic.Int64
 
 		core.StartSendEML(ctx, serverCfg, password, emlFiles, from, rcpt,
 			numberingFrom, numberingTo,
@@ -299,8 +309,8 @@ func (a *AppService) StartSendEML(emlFiles []string, from, rcpt string, numberin
 			customHeaders,
 			mailNumber, threadNumber, intervalMs,
 			func(p core.ProgressEvent) {
-				lastSent = p.Sent
-				lastFailed = p.Failed
+				lastSent.Store(int64(p.Sent))
+				lastFailed.Store(int64(p.Failed))
 				runtime.EventsEmit(a.ctx, "progress", p)
 			},
 			func(r core.SendResult) {
@@ -315,8 +325,8 @@ func (a *AppService) StartSendEML(emlFiles []string, from, rcpt string, numberin
 		)
 
 		runtime.EventsEmit(a.ctx, "done", map[string]int{
-			"success": lastSent,
-			"failed":  lastFailed,
+			"success": int(lastSent.Load()),
+			"failed":  int(lastFailed.Load()),
 			"total":   mailNumber,
 		})
 	}()

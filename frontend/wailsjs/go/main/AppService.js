@@ -26,6 +26,10 @@ export function GetVersion() {
   return window['go']['main']['AppService']['GetVersion']();
 }
 
+export function HasPassword(arg1) {
+  return window['go']['main']['AppService']['HasPassword'](arg1);
+}
+
 export function IsSending() {
   return window['go']['main']['AppService']['IsSending']();
 }

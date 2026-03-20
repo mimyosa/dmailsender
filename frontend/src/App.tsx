@@ -4,8 +4,7 @@ import {
   LoadConfig,
   SaveConfig,
   SyncConfig,
-  SavePassword,
-  LoadPassword,
+  HasPassword,
   StartSend,
   StopSend,
   ClearLog,
@@ -74,7 +73,7 @@ function App() {
       theme: 'dark',
     })
   );
-  const [password, setPassword] = useState('');
+  const [hasPassword, setHasPassword] = useState(false);
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState<ProgressEvent>({ sent: 0, failed: 0, total: 0 });
   const [results, setResults] = useState<SendResultItem[]>([]);
@@ -95,7 +94,7 @@ function App() {
         setTheme(cfg.theme);
       }
       if (cfg.server.auth && cfg.server.auth_id) {
-        LoadPassword(cfg.server.auth_id).then(setPassword).catch(() => {});
+        HasPassword(cfg.server.auth_id).then(setHasPassword).catch(() => {});
       }
     });
     GetConfigPath().then(setConfigPath).catch(() => {});
@@ -192,7 +191,7 @@ function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [config, sending, password]);
+  }, [config, sending, hasPassword]);
 
   // Save window state on resize
   useEffect(() => {
@@ -218,20 +217,17 @@ function App() {
   const handleSave = useCallback(async () => {
     try {
       await SaveConfig(config);
-      if (config.server.auth && config.server.auth_id && password) {
-        await SavePassword(config.server.auth_id, password);
-      }
     } catch (e) {
       showStatus('Save failed: ' + e);
     }
-  }, [config, password]);
+  }, [config]);
 
   const handleLoadConfig = useCallback(async () => {
     try {
       const cfg = await LoadConfigFrom();
       setConfig(cfg);
       if (cfg.server.auth && cfg.server.auth_id) {
-        LoadPassword(cfg.server.auth_id).then(setPassword).catch(() => {});
+        HasPassword(cfg.server.auth_id).then(setHasPassword).catch(() => {});
       }
     } catch (e) {
       showStatus('Load failed: ' + e);
@@ -248,7 +244,7 @@ function App() {
       if (config.server.port < 1 || config.server.port > 65535) errors.push('Port must be 1–65535');
       if (config.server.auth) {
         if (!config.server.auth_id.trim()) errors.push('Auth ID is required when AUTH is enabled');
-        if (!password.trim()) errors.push('Password is required when AUTH is enabled');
+        if (!hasPassword) errors.push('Password is required when AUTH is enabled');
       }
 
       // From/To required check (except EML mode + UseHeaderEnvelope=ON)
@@ -323,7 +319,7 @@ function App() {
       setSending(false);
       showStatus('Send error: ' + e);
     }
-  }, [config, password, isEml, emlFiles]);
+  }, [config, hasPassword, isEml, emlFiles]);
 
   const handleStopSend = useCallback(() => {
     StopSend();
@@ -456,10 +452,10 @@ function App() {
         {settingsOpen ? (
           <SettingsPanel
             config={config}
-            password={password}
+            hasPassword={hasPassword}
             sendMode={sendMode}
             onChange={setConfig}
-            onPasswordChange={setPassword}
+            onPasswordSaved={() => setHasPassword(true)}
             onClose={() => setSettingsOpen(false)}
           />
         ) : (

@@ -14,6 +14,8 @@ export function GetConfigPath():Promise<string>;
 
 export function GetVersion():Promise<string>;
 
+export function HasPassword(arg1:string):Promise<boolean>;
+
 export function IsSending():Promise<boolean>;
 
 export function LoadConfig():Promise<core.AppConfig>;

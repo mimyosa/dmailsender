@@ -1,20 +1,21 @@
 import { useState, useEffect } from 'react';
 import { core } from '../../wailsjs/go/models';
-import { TestConnection, SaveConfig } from '../../wailsjs/go/main/AppService';
+import { TestConnection, SaveConfig, SavePassword } from '../../wailsjs/go/main/AppService';
 
 type SendMode = 'input' | 'eml';
 
 interface Props {
   config: core.AppConfig;
-  password: string;
+  hasPassword: boolean;
   sendMode: SendMode;
   onChange: (cfg: core.AppConfig) => void;
-  onPasswordChange: (pw: string) => void;
+  onPasswordSaved: () => void;
   onClose: () => void;
 }
 
-export default function SettingsPanel({ config, password, sendMode, onChange, onPasswordChange, onClose }: Props) {
+export default function SettingsPanel({ config, hasPassword, sendMode, onChange, onPasswordSaved, onClose }: Props) {
   const [testing, setTesting] = useState(false);
+  const [pwInput, setPwInput] = useState('');
   const server = config.server;
   const mail = config.mail;
 
@@ -200,9 +201,23 @@ export default function SettingsPanel({ config, password, sendMode, onChange, on
               <label>Password</label>
               <input
                 type="password"
-                value={password}
-                onChange={(e) => onPasswordChange(e.target.value)}
-                placeholder="OS keychain"
+                value={pwInput}
+                onChange={(e) => setPwInput(e.target.value)}
+                onBlur={async () => {
+                  if (pwInput && server.auth_id) {
+                    await SavePassword(server.auth_id, pwInput);
+                    setPwInput('');
+                    onPasswordSaved();
+                  }
+                }}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter' && pwInput && server.auth_id) {
+                    await SavePassword(server.auth_id, pwInput);
+                    setPwInput('');
+                    onPasswordSaved();
+                  }
+                }}
+                placeholder={hasPassword ? 'Saved in keychain' : 'Enter password'}
               />
             </div>
           </>
