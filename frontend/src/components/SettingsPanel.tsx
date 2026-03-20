@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { core } from '../../wailsjs/go/models';
-import { TestConnection, SaveConfig, SavePassword } from '../../wailsjs/go/main/AppService';
+import { TestConnection, SyncConfig, SavePassword } from '../../wailsjs/go/main/AppService';
 
 type SendMode = 'input' | 'eml';
 
@@ -84,7 +84,7 @@ export default function SettingsPanel({ config, hasPassword, sendMode, onChange,
               onClick={async () => {
                 setTesting(true);
                 try {
-                  await SaveConfig(config);
+                  await SyncConfig(config);
                   await TestConnection();
                 } catch (e) {
                   // Error will appear in SMTP log

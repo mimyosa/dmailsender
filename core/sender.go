@@ -353,6 +353,9 @@ func SendEML(server ServerConfig, password string, from, rcpt, emlPath string, u
 	}
 
 	if err := client.DialAndSend(m); err != nil {
+		if onLog != nil {
+			onLog("error", fmt.Sprintf("Send failed: %v", err))
+		}
 		return "", "", fmt.Errorf("send failed: %w", err)
 	}
 
@@ -471,6 +474,9 @@ func SendOne(server ServerConfig, password string, mail MailConfig, index int, a
 	}
 
 	if err := client.DialAndSend(m); err != nil {
+		if onLog != nil {
+			onLog("error", fmt.Sprintf("Send failed: %v", err))
+		}
 		return fmt.Errorf("send failed: %w", err)
 	}
 

@@ -72,7 +72,13 @@ func StartSend(
 				subject = applyNumberingSubject(subject, idx)
 			}
 
-			err := SendOne(server, password, mail, idx, attachments, onLog)
+			// Wrap onLog with mail index for SMTP log correlation
+			indexedLog := func(direction, line string) {
+				if onLog != nil {
+					onLog(direction, fmt.Sprintf("[#%d] %s", idx, line))
+				}
+			}
+			err := SendOne(server, password, mail, idx, attachments, indexedLog)
 			result := SendResult{
 				Index:   idx,
 				Success: err == nil,
@@ -179,7 +185,13 @@ func StartSendEML(
 				actualRcpt = applyNumbering(rcpt, idx)
 			}
 
-			usedFrom, usedTo, err := SendEML(server, password, actualFrom, actualRcpt, path, useHeaderEnvelope, updateMessageID, customHeaders, onLog)
+			// Wrap onLog with mail index for SMTP log correlation
+			indexedLog := func(direction, line string) {
+				if onLog != nil {
+					onLog(direction, fmt.Sprintf("[#%d] %s", idx, line))
+				}
+			}
+			usedFrom, usedTo, err := SendEML(server, password, actualFrom, actualRcpt, path, useHeaderEnvelope, updateMessageID, customHeaders, indexedLog)
 			// Use the actual addresses returned by SendEML for accurate logging
 			resultFrom := actualFrom
 			resultTo := actualRcpt

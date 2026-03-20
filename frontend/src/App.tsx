@@ -39,11 +39,18 @@ interface SendResultItem {
   from?: string;
   to?: string;
   subject?: string;
+  timestamp?: string;
 }
 
 interface LogEntry {
   direction: string;
   line: string;
+  timestamp?: string;
+}
+
+function now() {
+  const d = new Date();
+  return d.toTimeString().slice(0, 8); // "HH:MM:SS"
 }
 
 function App() {
@@ -106,16 +113,19 @@ function App() {
         setResults((prev) => [...prev, {
           index: -1, success: false,
           from: '', to: '', subject: `[Version] ${v.error}`,
+          timestamp: now(),
         }]);
       } else if (v.update_avail) {
         setResults((prev) => [...prev, {
           index: -1, success: true,
           from: '', to: '', subject: `[Update] New version available: ${v.latest} (current: ${v.current})`,
+          timestamp: now(),
         }]);
       } else {
         setResults((prev) => [...prev, {
           index: -1, success: true,
           from: '', to: '', subject: `[Version] Up to date (${v.current})`,
+          timestamp: now(),
         }]);
       }
     }).catch(() => {});
@@ -128,28 +138,37 @@ function App() {
       EventsOn('result', (r: SendResultItem) =>
         setResults((prev) => [...prev, r])
       ),
-      EventsOn('done', () => setSending(false)),
+      EventsOn('done', (d: { success: number; failed: number; total: number; timestamp?: string }) => {
+        setSending(false);
+        setResults((prev) => [...prev, {
+          index: -1, success: true,
+          from: '', to: '', subject: `[Send] Done — ${d.success} sent, ${d.failed} failed, ${d.total} total`,
+          timestamp: d.timestamp || now(),
+        }]);
+      }),
       EventsOn('smtp:log', (entry: LogEntry) =>
         setLogs((prev) => [...prev, entry])
       ),
       EventsOn('log:clear', () => setLogs([])),
-      EventsOn('config:saved', (data: { path: string }) => {
+      EventsOn('config:saved', (data: { path: string; timestamp?: string }) => {
         setConfigPath(data.path);
         showSaveMsg(`Saved`);
         setResults((prev) => [...prev, {
           index: -1, success: true,
           from: '', to: '', subject: `[Config] Saved to ${data.path}`,
+          timestamp: data.timestamp || now(),
         }]);
       }),
-      EventsOn('config:loaded', (data: { path: string }) => {
+      EventsOn('config:loaded', (data: { path: string; timestamp?: string }) => {
         setConfigPath(data.path);
         showSaveMsg(`Loaded`);
         setResults((prev) => [...prev, {
           index: -1, success: true,
           from: '', to: '', subject: `[Config] Loaded from ${data.path}`,
+          timestamp: data.timestamp || now(),
         }]);
       }),
-      EventsOn('test:result', (data: { success: boolean; error?: string; server: string }) => {
+      EventsOn('test:result', (data: { success: boolean; error?: string; server: string; timestamp?: string }) => {
         setResults((prev) => [...prev, {
           index: -1,
           success: data.success,
@@ -157,6 +176,7 @@ function App() {
           subject: data.success
             ? `[Test] Connection OK`
             : `[Test] Failed: ${data.error}`,
+          timestamp: data.timestamp || now(),
         }]);
       }),
     ];
@@ -262,7 +282,7 @@ function App() {
       if (errors.length > 0) {
         showStatus(errors[0]);
         errors.forEach((msg) => {
-          setResults((prev) => [...prev, { index: -1, success: false, from: '', to: '', subject: `[Validation] ${msg}` }]);
+          setResults((prev) => [...prev, { index: -1, success: false, from: '', to: '', subject: `[Validation] ${msg}`, timestamp: now() }]);
         });
         return;
       }
@@ -298,6 +318,11 @@ function App() {
         const emlCount = config.mail.mail_number || emlFiles.length;
         setProgress({ sent: 0, failed: 0, total: emlCount });
         setSending(true);
+        setResults((prev) => [...prev, {
+          index: -1, success: true, from: '', to: '',
+          subject: `[Send] Started — EML mode, ${emlCount} mails, ${config.mail.thread_number} threads, interval ${config.mail.interval_ms}ms`,
+          timestamp: now(),
+        }]);
         await StartSendEML(
           emlFiles,
           config.mail.mail_from,
@@ -313,6 +338,11 @@ function App() {
       } else {
         setProgress({ sent: 0, failed: 0, total: config.mail.mail_number });
         setSending(true);
+        setResults((prev) => [...prev, {
+          index: -1, success: true, from: '', to: '',
+          subject: `[Send] Started — ${config.mail.mail_number} mails, ${config.mail.thread_number} threads, interval ${config.mail.interval_ms}ms`,
+          timestamp: now(),
+        }]);
         await StartSend();
       }
     } catch (e) {
@@ -323,6 +353,11 @@ function App() {
 
   const handleStopSend = useCallback(() => {
     StopSend();
+    setResults((prev) => [...prev, {
+      index: -1, success: false, from: '', to: '',
+      subject: `[Send] Stopped by user`,
+      timestamp: now(),
+    }]);
   }, []);
 
   const handleClearLog = useCallback(() => {

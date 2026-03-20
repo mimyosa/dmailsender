@@ -82,5 +82,27 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body: |
+            ## What's New in ${{ github.ref_name }}
+
+            ### UI Improvements
+            - **Envelope opt-chip buttons redesigned** — `#` → `#Num`, `TS` → `Time` with larger size for better readability
+            - **From ↔ To Swap button** — One-click swap between sender and recipient addresses (vertical button spanning both rows)
+            - **Timestamps on Results & SMTP Log** — Every log entry now shows `HH:MM:SS` timestamp (measured at backend event time)
+            - **Send Start / Stop / Done logs** — Results tab now records when sending starts, stops, and completes with details
+
+            ### SMTP Log Enhancements
+            - **Send failure errors in SMTP Log** — SMTP errors (e.g., 550 relay denied) now appear in the SMTP Log tab, not just Results
+            - **Mail index prefix `[#N]`** — Each SMTP log line is tagged with its mail index for easy correlation with Results tab
+
+            ### Security (from previous session)
+            - **Data race fix** — `lastSent`/`lastFailed` counters now use `atomic.Int64` for thread safety
+            - **Password removed from frontend state** — Password is saved directly to OS keychain and cleared from memory immediately
+            - **Test Connection no longer saves config** — Test button now syncs to memory only (consistent with Send behavior)
+
+            ### Bug Fixes
+            - Fixed Test Connection button unintentionally saving config to disk
+
+            ---
+            **Full Changelog**: https://github.com/mimyosa/dmailsender/compare/v0.5...${{ github.ref_name }}
           files: artifacts/*

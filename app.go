@@ -6,11 +6,17 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"dMailSender/core"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// ts returns the current time as "HH:MM:SS" for event timestamps.
+func ts() string {
+	return time.Now().Format("15:04:05")
+}
 
 // AppService is the bridge between frontend and core engine.
 // It delegates all business logic to core/ and only handles
@@ -66,7 +72,8 @@ func (a *AppService) SaveConfig(cfg core.AppConfig) error {
 	if err == nil {
 		path, _ := core.ConfigPath()
 		runtime.EventsEmit(a.ctx, "config:saved", map[string]string{
-			"path": path,
+			"path":      path,
+			"timestamp": ts(),
 		})
 	}
 	return err
@@ -119,7 +126,8 @@ func (a *AppService) LoadConfigFrom() (core.AppConfig, error) {
 	}
 	a.config = cfg
 	runtime.EventsEmit(a.ctx, "config:loaded", map[string]string{
-		"path": file,
+		"path":      file,
+		"timestamp": ts(),
 	})
 	return cfg, nil
 }
@@ -133,20 +141,23 @@ func (a *AppService) TestConnection() error {
 		runtime.EventsEmit(a.ctx, "smtp:log", map[string]string{
 			"direction": direction,
 			"line":      line,
+			"timestamp": ts(),
 		})
 	})
 
 	addr := fmt.Sprintf("%s:%d", a.config.Server.SMTP, a.config.Server.Port)
 	if err != nil {
 		runtime.EventsEmit(a.ctx, "test:result", map[string]interface{}{
-			"success": false,
-			"error":   err.Error(),
-			"server":  addr,
+			"success":   false,
+			"error":     err.Error(),
+			"server":    addr,
+			"timestamp": ts(),
 		})
 	} else {
 		runtime.EventsEmit(a.ctx, "test:result", map[string]interface{}{
-			"success": true,
-			"server":  addr,
+			"success":   true,
+			"server":    addr,
+			"timestamp": ts(),
 		})
 	}
 	return err
@@ -219,20 +230,23 @@ func (a *AppService) StartSend() error {
 				runtime.EventsEmit(a.ctx, "progress", p)
 			},
 			func(r core.SendResult) {
+				r.Timestamp = ts()
 				runtime.EventsEmit(a.ctx, "result", r)
 			},
 			func(direction, line string) {
 				runtime.EventsEmit(a.ctx, "smtp:log", map[string]string{
 					"direction": direction,
 					"line":      line,
+					"timestamp": ts(),
 				})
 			},
 		)
 
-		runtime.EventsEmit(a.ctx, "done", map[string]int{
-			"success": int(lastSent.Load()),
-			"failed":  int(lastFailed.Load()),
-			"total":   mailCfg.MailNumber,
+		runtime.EventsEmit(a.ctx, "done", map[string]interface{}{
+			"success":   int(lastSent.Load()),
+			"failed":    int(lastFailed.Load()),
+			"total":     mailCfg.MailNumber,
+			"timestamp": ts(),
 		})
 	}()
 
@@ -314,20 +328,23 @@ func (a *AppService) StartSendEML(emlFiles []string, from, rcpt string, numberin
 				runtime.EventsEmit(a.ctx, "progress", p)
 			},
 			func(r core.SendResult) {
+				r.Timestamp = ts()
 				runtime.EventsEmit(a.ctx, "result", r)
 			},
 			func(direction, line string) {
 				runtime.EventsEmit(a.ctx, "smtp:log", map[string]string{
 					"direction": direction,
 					"line":      line,
+					"timestamp": ts(),
 				})
 			},
 		)
 
-		runtime.EventsEmit(a.ctx, "done", map[string]int{
-			"success": int(lastSent.Load()),
-			"failed":  int(lastFailed.Load()),
-			"total":   mailNumber,
+		runtime.EventsEmit(a.ctx, "done", map[string]interface{}{
+			"success":   int(lastSent.Load()),
+			"failed":    int(lastFailed.Load()),
+			"total":     mailNumber,
+			"timestamp": ts(),
 		})
 	}()
 

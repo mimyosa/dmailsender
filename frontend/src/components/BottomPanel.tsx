@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 interface LogEntry {
   direction: string;
   line: string;
+  timestamp?: string;
 }
 
 interface SendResultItem {
@@ -12,6 +13,7 @@ interface SendResultItem {
   from?: string;
   to?: string;
   subject?: string;
+  timestamp?: string;
 }
 
 interface ProgressEvent {
@@ -122,7 +124,8 @@ export default function BottomPanel({ logs, results, progress, sending, onClearL
                 key={i}
                 className={`log-line ${l.direction === 'client' ? 'log-client' : 'log-server'}`}
               >
-                {l.direction === 'client' ? '→' : '←'} {l.line}
+                {l.timestamp && <span className="log-ts">{l.timestamp}</span>}
+                {l.direction === 'client' ? ' → ' : ' ← '}{l.line}
               </div>
             ))}
           </div>
@@ -133,6 +136,7 @@ export default function BottomPanel({ logs, results, progress, sending, onClearL
                 className={`result-item ${r.success ? 'success' : 'failed'}`}
                 key={`${r.index}-${i}`}
               >
+                {r.timestamp && <span className="result-ts">{r.timestamp}</span>}
                 {r.index >= 0 ? (
                   <>
                     <span className="result-index">#{r.index}</span>

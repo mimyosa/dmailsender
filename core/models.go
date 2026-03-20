@@ -63,12 +63,13 @@ type AppConfig struct {
 
 // SendResult is the outcome of sending a single mail.
 type SendResult struct {
-	Index   int    `json:"index"`
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
-	From    string `json:"from,omitempty"`
-	To      string `json:"to,omitempty"`
-	Subject string `json:"subject,omitempty"`
+	Index     int    `json:"index"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+	From      string `json:"from,omitempty"`
+	To        string `json:"to,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 // ProgressEvent reports real-time send progress.
