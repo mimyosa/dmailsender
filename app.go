@@ -181,6 +181,12 @@ func (a *AppService) StartSend() error {
 		password = pw
 	}
 
+	// Deep copy config and attachments to avoid race with UI changes during send
+	serverCfg := a.config.Server
+	mailCfg := a.config.Mail
+	attachCopy := make([]string, len(a.attachments))
+	copy(attachCopy, a.attachments)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	a.mu.Lock()
 	a.cancel = cancel
@@ -196,7 +202,7 @@ func (a *AppService) StartSend() error {
 
 		var lastSent, lastFailed int
 
-		core.StartSend(ctx, a.config.Server, password, a.config.Mail, a.attachments,
+		core.StartSend(ctx, serverCfg, password, mailCfg, attachCopy,
 			func(p core.ProgressEvent) {
 				lastSent = p.Sent
 				lastFailed = p.Failed
@@ -216,7 +222,7 @@ func (a *AppService) StartSend() error {
 		runtime.EventsEmit(a.ctx, "done", map[string]int{
 			"success": lastSent,
 			"failed":  lastFailed,
-			"total":   a.config.Mail.MailNumber,
+			"total":   mailCfg.MailNumber,
 		})
 	}()
 
@@ -267,6 +273,11 @@ func (a *AppService) StartSendEML(emlFiles []string, from, rcpt string, numberin
 		threadNumber = 1
 	}
 
+	// Deep copy config to avoid race with UI changes during send
+	serverCfg := a.config.Server
+	customHeaders := make([]core.Header, len(a.config.Mail.CustomHeaders))
+	copy(customHeaders, a.config.Mail.CustomHeaders)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	a.mu.Lock()
 	a.cancel = cancel
@@ -282,10 +293,10 @@ func (a *AppService) StartSendEML(emlFiles []string, from, rcpt string, numberin
 
 		var lastSent, lastFailed int
 
-		core.StartSendEML(ctx, a.config.Server, password, emlFiles, from, rcpt,
+		core.StartSendEML(ctx, serverCfg, password, emlFiles, from, rcpt,
 			numberingFrom, numberingTo,
 			useHeaderEnvelope, updateMessageID,
-			a.config.Mail.CustomHeaders,
+			customHeaders,
 			mailNumber, threadNumber, intervalMs,
 			func(p core.ProgressEvent) {
 				lastSent = p.Sent

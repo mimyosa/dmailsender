@@ -183,6 +183,11 @@ export default function SettingsPanel({ config, password, sendMode, onChange, on
         </div>
         {server.auth && (
           <>
+            {!server.tls && !server.ssl && (
+              <div className="s-warning">
+                ⚠ TLS/SSL 없이 AUTH 사용 시 자격 증명이 평문으로 전송됩니다.
+              </div>
+            )}
             <div className="s-field">
               <label>Auth ID</label>
               <input
@@ -240,16 +245,13 @@ export default function SettingsPanel({ config, password, sendMode, onChange, on
               onChange={(e) => {
                 setThreadsText(e.target.value);
                 const v = parseInt(e.target.value);
-                if (!isNaN(v) && v >= 1 && v <= 50) updateMail({ thread_number: v });
+                if (!isNaN(v) && v >= 1) updateMail({ thread_number: v });
               }}
               onBlur={() => {
                 const v = parseInt(threadsText);
                 if (isNaN(v) || v < 1) {
                   updateMail({ thread_number: 1 });
                   setThreadsText('1');
-                } else if (v > 50) {
-                  updateMail({ thread_number: 50 });
-                  setThreadsText('50');
                 }
               }}
             />

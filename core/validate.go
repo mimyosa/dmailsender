@@ -23,6 +23,9 @@ func ValidateServerConfig(cfg ServerConfig) []string {
 		if cfg.AuthID == "" {
 			errs = append(errs, "Auth ID is required when auth is enabled")
 		}
+		if !cfg.TLS && !cfg.SSL {
+			errs = append(errs, "WARNING: AUTH is enabled without TLS/SSL — credentials will be sent in plaintext")
+		}
 	}
 
 	return errs
@@ -38,8 +41,8 @@ func ValidateMailConfig(cfg MailConfig) []string {
 		errs = append(errs, fmt.Sprintf("Mail Number must be 1–100,000, got %d", cfg.MailNumber))
 	}
 
-	if cfg.ThreadNumber < 1 || cfg.ThreadNumber > 50 {
-		errs = append(errs, fmt.Sprintf("Thread Number must be 1–50, got %d", cfg.ThreadNumber))
+	if cfg.ThreadNumber < 1 {
+		errs = append(errs, fmt.Sprintf("Thread Number must be at least 1, got %d", cfg.ThreadNumber))
 	}
 
 	if cfg.IntervalMs < 0 || cfg.IntervalMs > 60000 {

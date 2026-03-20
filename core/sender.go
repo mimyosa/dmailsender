@@ -177,6 +177,9 @@ type smtpLogger struct {
 	onLog func(direction, line string)
 }
 
+// authMask matches AUTH PLAIN/LOGIN credentials in SMTP log lines and masks them.
+var authMask = regexp.MustCompile(`(?i)(AUTH\s+(?:PLAIN|LOGIN)\s+).+`)
+
 func (l *smtpLogger) log(dir string, entry gomaillog.Log) {
 	if l.onLog == nil {
 		return
@@ -186,6 +189,8 @@ func (l *smtpLogger) log(dir string, entry gomaillog.Log) {
 	for _, line := range strings.Split(strings.TrimRight(msg, "\r\n"), "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line != "" {
+			// Mask AUTH credentials (Base64-encoded ID/PW) in SMTP log
+			line = authMask.ReplaceAllString(line, "${1}****")
 			l.onLog(dir, line)
 		}
 	}
@@ -209,6 +214,41 @@ func (l *smtpLogger) Warnf(entry gomaillog.Log) {
 
 func (l *smtpLogger) Errorf(entry gomaillog.Log) {
 	l.log("error", entry)
+}
+
+// reservedHeaders is a set of standard headers that should not be overwritten by custom headers.
+var reservedHeaders = map[string]bool{
+	"from": true, "to": true, "cc": true, "bcc": true,
+	"subject": true, "date": true, "message-id": true,
+	"reply-to": true, "return-path": true, "sender": true,
+}
+
+// sanitizeHeader removes \r and \n from header key/value to prevent CRLF injection.
+func sanitizeHeader(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	return s
+}
+
+// applyCustomHeaders applies custom headers to a message with CRLF sanitization.
+// Reserved headers (From, To, Subject, etc.) are skipped with a warning log.
+func applyCustomHeaders(m *gomail.Msg, headers []Header, onLog func(direction, line string)) {
+	for _, h := range headers {
+		if h.Key == "" {
+			continue
+		}
+		key := sanitizeHeader(h.Key)
+		value := sanitizeHeader(h.Value)
+
+		if reservedHeaders[strings.ToLower(key)] {
+			if onLog != nil {
+				onLog("warn", fmt.Sprintf("Custom header %q is a reserved header — skipped (use envelope fields instead)", key))
+			}
+			continue
+		}
+
+		m.SetGenHeader(gomail.Header(key), value)
+	}
 }
 
 // extractAddr extracts the bare email address from a header value like "Display Name <addr@example.com>".
@@ -249,35 +289,44 @@ func SendEML(server ServerConfig, password string, from, rcpt, emlPath string, u
 			emlTo = extractAddr(addrs[0])
 		}
 
+		// Validate: EML must have From/To headers when using header envelope
+		if emlFrom == "" {
+			return "", "", fmt.Errorf("EML file has no From header — cannot use header envelope")
+		}
+		if emlTo == "" {
+			return "", "", fmt.Errorf("EML file has no To header — cannot use header envelope")
+		}
+
 		if onLog != nil {
 			onLog("info", fmt.Sprintf("EML parsed OK — Using header envelope: From=%q, To=%q", emlFrom, emlTo))
 		}
 
 		// Set envelope sender from EML header (bare address for SMTP MAIL FROM)
-		if emlFrom != "" {
-			if err := m.EnvelopeFrom(emlFrom); err != nil {
-				return "", "", fmt.Errorf("invalid EML header From for envelope: %w", err)
-			}
+		if err := m.EnvelopeFrom(emlFrom); err != nil {
+			return "", "", fmt.Errorf("invalid EML header From for envelope: %w", err)
 		}
 		// To header is not overridden — go-mail uses the EML's original To for RCPT TO
 
 		usedFrom = emlFrom
 		usedTo = emlTo
 	} else {
-		// Override with user-provided values
+		// Override with user-provided values (required when UseHeaderEnvelope is OFF)
+		if from == "" {
+			return "", "", fmt.Errorf("From address is required when Use Header Envelope is off")
+		}
+		if rcpt == "" {
+			return "", "", fmt.Errorf("To address is required when Use Header Envelope is off")
+		}
+
 		if onLog != nil {
 			onLog("info", fmt.Sprintf("EML parsed OK — From override: %q, To override: %q", from, rcpt))
 		}
 
-		if from != "" {
-			if err := m.From(from); err != nil {
-				return "", "", fmt.Errorf("invalid from: %w", err)
-			}
+		if err := m.From(from); err != nil {
+			return "", "", fmt.Errorf("invalid from: %w", err)
 		}
-		if rcpt != "" {
-			if err := m.To(rcpt); err != nil {
-				return "", "", fmt.Errorf("invalid to: %w", err)
-			}
+		if err := m.To(rcpt); err != nil {
+			return "", "", fmt.Errorf("invalid to: %w", err)
 		}
 
 		usedFrom = from
@@ -288,12 +337,8 @@ func SendEML(server ServerConfig, password string, from, rcpt, emlPath string, u
 		m.SetMessageID()
 	}
 
-	// Custom headers (appended to existing EML headers)
-	for _, h := range customHeaders {
-		if h.Key != "" {
-			m.SetGenHeader(gomail.Header(h.Key), h.Value)
-		}
-	}
+	// Custom headers (sanitized, reserved headers skipped with warning)
+	applyCustomHeaders(m, customHeaders, onLog)
 
 	// Build client options
 	opts := buildClientOpts(server, password, onLog)
@@ -363,6 +408,14 @@ func SendOne(server ServerConfig, password string, mail MailConfig, index int, a
 		rcpt = applyNumbering(rcpt, index)
 	}
 
+	// From/To are always required in Input mode
+	if from == "" {
+		return fmt.Errorf("From address is required")
+	}
+	if rcpt == "" {
+		return fmt.Errorf("To address is required")
+	}
+
 	subject := mail.Subject
 	if mail.NumberingSubject {
 		subject = applyNumberingSubject(subject, index)
@@ -379,12 +432,8 @@ func SendOne(server ServerConfig, password string, mail MailConfig, index int, a
 	}
 	m.Subject(subject)
 
-	// Custom headers
-	for _, h := range mail.CustomHeaders {
-		if h.Key != "" {
-			m.SetGenHeader(gomail.Header(h.Key), h.Value)
-		}
-	}
+	// Custom headers (sanitized, reserved headers skipped with warning)
+	applyCustomHeaders(m, mail.CustomHeaders, onLog)
 
 	// Body
 	if mail.ContentType == "text/html" {

@@ -251,9 +251,16 @@ function App() {
         if (!password.trim()) errors.push('Password is required when AUTH is enabled');
       }
 
+      // From/To required check (except EML mode + UseHeaderEnvelope=ON)
+      const needFromTo = !(isEml && config.mail.use_header_envelope);
+      if (needFromTo) {
+        if (!config.mail.mail_from.trim()) errors.push('From address is required');
+        if (!config.mail.rcpt_to.trim()) errors.push('To address is required');
+      }
+
       // Send option range checks
       if (config.mail.mail_number < 1 || config.mail.mail_number > 100000) errors.push('Count must be 1–100,000');
-      if (config.mail.thread_number < 1 || config.mail.thread_number > 50) errors.push('Threads must be 1–50');
+      if (config.mail.thread_number < 1) errors.push('Threads must be at least 1');
       if (config.mail.interval_ms < 0 || config.mail.interval_ms > 60000) errors.push('Interval must be 0–60,000 ms');
 
       if (errors.length > 0) {
@@ -267,15 +274,31 @@ function App() {
       // Sync current frontend config to backend (in-memory only, no disk write)
       await SyncConfig(config);
 
+      // --- Collect warnings for confirmation dialog ---
+      const warnings: string[] = [];
+      const sendCount = isEml ? (config.mail.mail_number || emlFiles.length) : config.mail.mail_number;
+
+      if (isEml && emlFiles.length === 0) {
+        showStatus('No EML files selected');
+        return;
+      }
+
+      if (sendCount >= 100) {
+        warnings.push(`${sendCount.toLocaleString()}건의 메일을 전송합니다.`);
+      }
+      if (config.mail.thread_number > 50) {
+        warnings.push(`스레드 수가 ${config.mail.thread_number}개로 설정되어 있습니다. 서버에 부하가 발생할 수 있습니다.`);
+      }
+      if (config.server.auth && !config.server.tls && !config.server.ssl) {
+        warnings.push(`TLS/SSL 없이 AUTH를 사용합니다. 자격 증명이 평문으로 전송됩니다.`);
+      }
+
+      if (warnings.length > 0) {
+        const msg = warnings.join('\n') + '\n\n진행하시겠습니까?';
+        if (!confirm(msg)) return;
+      }
+
       if (isEml) {
-        if (emlFiles.length === 0) {
-          showStatus('No EML files selected');
-          return;
-        }
-        const emlTotal = config.mail.mail_number || emlFiles.length;
-        if (emlTotal >= 100) {
-          if (!confirm(`Send EML file ${emlTotal} times. Are you sure?`)) return;
-        }
         const emlCount = config.mail.mail_number || emlFiles.length;
         setProgress({ sent: 0, failed: 0, total: emlCount });
         setSending(true);
@@ -292,9 +315,6 @@ function App() {
           config.mail.interval_ms,
         );
       } else {
-        if (config.mail.mail_number >= 100) {
-          if (!confirm(`Send ${config.mail.mail_number} mails. Are you sure?`)) return;
-        }
         setProgress({ sent: 0, failed: 0, total: config.mail.mail_number });
         setSending(true);
         await StartSend();
