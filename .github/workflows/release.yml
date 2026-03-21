@@ -88,20 +88,27 @@ jobs:
             ### UI Improvements
             - **Envelope opt-chip buttons redesigned** — `#` → `#Num`, `TS` → `Time` with larger size for better readability
             - **From ↔ To Swap button** — One-click swap between sender and recipient addresses (vertical button spanning both rows)
+            - **Input/EML mode toggle** — Dropdown replaced with toggle button group for faster switching
+            - **Rename Implicit SSL → SSL/TLS** — Clearer connection mode label
+            - **Smaller default window** — Minimum size reduced from 1024×720 to 880×620
             - **Timestamps on Results & SMTP Log** — Every log entry now shows `HH:MM:SS` timestamp (measured at backend event time)
             - **Send Start / Stop / Done logs** — Results tab now records when sending starts, stops, and completes with details
 
-            ### SMTP Log Enhancements
-            - **Send failure errors in SMTP Log** — SMTP errors (e.g., 550 relay denied) now appear in the SMTP Log tab, not just Results
+            ### SMTP & Send
+            - **EML mode: raw sending via net/smtp** — EML files are now sent as-is, preserving original MIME structure, attachments, and boundaries exactly
+            - **TLS version pinning** — Selected TLS version is now used exactly (e.g., TLS 1.2 only), not as a minimum
+            - **Remove default User-Agent/X-Mailer headers** — go-mail's default headers no longer added in Input mode
+            - **Send failure errors in SMTP Log** — SMTP errors now appear in the SMTP Log tab, not just Results
             - **Mail index prefix `[#N]`** — Each SMTP log line is tagged with its mail index for easy correlation with Results tab
+
+            ### Window
+            - **Window state saved on close** — Size and position are always saved when the app exits
+            - **Window state restored on launch** — Next launch restores the saved window size and position
 
             ### Security (from previous session)
             - **Data race fix** — `lastSent`/`lastFailed` counters now use `atomic.Int64` for thread safety
             - **Password removed from frontend state** — Password is saved directly to OS keychain and cleared from memory immediately
-            - **Test Connection no longer saves config** — Test button now syncs to memory only (consistent with Send behavior)
-
-            ### Bug Fixes
-            - Fixed Test Connection button unintentionally saving config to disk
+            - **Test Connection no longer saves config** — Test button now syncs to memory only
 
             ---
             **Full Changelog**: https://github.com/mimyosa/dmailsender/compare/v0.5...${{ github.ref_name }}
