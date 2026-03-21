@@ -191,8 +191,8 @@ func StartSendEML(
 					onLog(direction, fmt.Sprintf("[#%d] %s", idx, line))
 				}
 			}
-			usedFrom, usedTo, err := SendEML(server, password, actualFrom, actualRcpt, path, useHeaderEnvelope, updateMessageID, customHeaders, indexedLog)
-			// Use the actual addresses returned by SendEML for accurate logging
+			usedFrom, usedTo, err := SendEMLRaw(server, password, actualFrom, actualRcpt, path, useHeaderEnvelope, updateMessageID, customHeaders, indexedLog)
+			// Use the actual addresses returned by SendEMLRaw for accurate logging
 			resultFrom := actualFrom
 			resultTo := actualRcpt
 			if useHeaderEnvelope && usedFrom != "" {

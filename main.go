@@ -20,15 +20,15 @@ func main() {
 	cfg, _ := core.LoadConfig()
 	width := cfg.Window.Width
 	height := cfg.Window.Height
-	if width < 1024 || height < 720 {
-		width = 1024
-		height = 720
+	if width < 880 || height < 620 {
+		width = 880
+		height = 620
 	}
 
 	err := wails.Run(&options.App{
 		Title:     "dMailSender",
-		MinWidth:  1024,
-		MinHeight: 720,
+		MinWidth:  880,
+		MinHeight: 620,
 		Width:     width,
 		Height:    height,
 		AssetServer: &assetserver.Options{

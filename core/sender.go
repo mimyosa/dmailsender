@@ -1,11 +1,15 @@
 package core
 
 import (
+	"bytes"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"mime"
 	"net"
 	netmail "net/mail"
+	"net/smtp"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -156,15 +160,15 @@ func applyNumberingSubject(subject string, index int) string {
 }
 
 // parseTLSVersion returns min and max TLS version from a string like "1.0", "1.2", "1.3".
-// Default is TLS 1.3 only. When a lower version is selected, it sets that as min and 1.3 as max.
+// Both min and max are set to the same value so the exact selected version is used.
 func parseTLSVersion(ver string) (min, max uint16) {
 	switch ver {
 	case "1.0":
-		return tls.VersionTLS10, tls.VersionTLS13
+		return tls.VersionTLS10, tls.VersionTLS10
 	case "1.1":
-		return tls.VersionTLS11, tls.VersionTLS13
+		return tls.VersionTLS11, tls.VersionTLS11
 	case "1.2":
-		return tls.VersionTLS12, tls.VersionTLS13
+		return tls.VersionTLS12, tls.VersionTLS12
 	case "1.3":
 		return tls.VersionTLS13, tls.VersionTLS13
 	default:
@@ -262,104 +266,260 @@ func extractAddr(raw string) string {
 	return addr.Address
 }
 
-// SendEML sends an .eml file via SMTP using EMLToMsgFromFile.
-// Returns the actual from/to addresses used for sending (for accurate logging).
-// When useHeaderEnvelope=true, the EML's own From/To headers are used as SMTP envelope addresses.
-// When useHeaderEnvelope=false, the from/rcpt parameters override the SMTP envelope addresses.
-func SendEML(server ServerConfig, password string, from, rcpt, emlPath string, useHeaderEnvelope bool, updateMessageID bool, customHeaders []Header, onLog func(direction, line string)) (usedFrom, usedTo string, err error) {
-	if onLog != nil {
-		onLog("info", fmt.Sprintf("Parsing EML file: %s", emlPath))
+// SendEMLRaw sends an .eml file via SMTP by transmitting the raw EML bytes after DATA.
+// Unlike the old SendEML (which parsed and reassembled via go-mail), this preserves the
+// original EML content exactly — MIME structure, attachments, boundaries, and nested EMLs.
+// Only Message-ID and custom headers are modified at the byte level in the header section.
+func SendEMLRaw(server ServerConfig, password string, from, rcpt, emlPath string, useHeaderEnvelope bool, updateMessageID bool, customHeaders []Header, onLog func(direction, line string)) (usedFrom, usedTo string, err error) {
+	log := func(dir, msg string) {
+		if onLog != nil {
+			onLog(dir, msg)
+		}
 	}
 
-	m, err := gomail.EMLToMsgFromFile(emlPath)
+	// 1. Read EML file as raw bytes
+	log("info", fmt.Sprintf("Reading EML file: %s", emlPath))
+	rawBytes, err := os.ReadFile(emlPath)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to parse EML file: %w", err)
+		return "", "", fmt.Errorf("failed to read EML file: %w", err)
 	}
 
-	if useHeaderEnvelope {
-		// Use EML header From/To as SMTP envelope addresses (no UI override)
-		// - From header → extract bare address → set as EnvelopeFrom (MAIL FROM)
-		// - To header → keep as-is (go-mail uses it for RCPT TO automatically)
-		emlFrom := ""
-		emlTo := ""
-		if addrs := m.GetFromString(); len(addrs) > 0 {
-			emlFrom = extractAddr(addrs[0])
-		}
-		if addrs := m.GetToString(); len(addrs) > 0 {
-			emlTo = extractAddr(addrs[0])
-		}
+	// 2. Split header and body at first blank line (\r\n\r\n or \n\n)
+	headerPart, bodyPart := splitEMLHeaderBody(rawBytes)
 
-		// Validate: EML must have From/To headers when using header envelope
+	// 3. Determine envelope addresses
+	if useHeaderEnvelope {
+		emlFrom := extractHeaderValue(headerPart, "From")
+		emlTo := extractHeaderValue(headerPart, "To")
 		if emlFrom == "" {
 			return "", "", fmt.Errorf("EML file has no From header — cannot use header envelope")
 		}
 		if emlTo == "" {
 			return "", "", fmt.Errorf("EML file has no To header — cannot use header envelope")
 		}
-
-		if onLog != nil {
-			onLog("info", fmt.Sprintf("EML parsed OK — Using header envelope: From=%q, To=%q", emlFrom, emlTo))
-		}
-
-		// Set envelope sender from EML header (bare address for SMTP MAIL FROM)
-		if err := m.EnvelopeFrom(emlFrom); err != nil {
-			return "", "", fmt.Errorf("invalid EML header From for envelope: %w", err)
-		}
-		// To header is not overridden — go-mail uses the EML's original To for RCPT TO
-
-		usedFrom = emlFrom
-		usedTo = emlTo
+		usedFrom = extractAddr(emlFrom)
+		usedTo = extractAddr(emlTo)
+		log("info", fmt.Sprintf("Using header envelope: From=%q, To=%q", usedFrom, usedTo))
 	} else {
-		// Override with user-provided values (required when UseHeaderEnvelope is OFF)
 		if from == "" {
 			return "", "", fmt.Errorf("From address is required when Use Header Envelope is off")
 		}
 		if rcpt == "" {
 			return "", "", fmt.Errorf("To address is required when Use Header Envelope is off")
 		}
-
-		if onLog != nil {
-			onLog("info", fmt.Sprintf("EML parsed OK — From override: %q, To override: %q", from, rcpt))
-		}
-
-		if err := m.From(from); err != nil {
-			return "", "", fmt.Errorf("invalid from: %w", err)
-		}
-		if err := m.To(rcpt); err != nil {
-			return "", "", fmt.Errorf("invalid to: %w", err)
-		}
-
 		usedFrom = from
 		usedTo = rcpt
+		log("info", fmt.Sprintf("Envelope override: From=%q, To=%q", usedFrom, usedTo))
 	}
 
+	// 4. Modify header section (Message-ID, Custom Headers)
 	if updateMessageID {
-		m.SetMessageID()
+		newID := generateMessageID()
+		headerPart = replaceOrInsertHeader(headerPart, "Message-ID", "<"+newID+">")
+		log("info", fmt.Sprintf("Message-ID updated: <%s>", newID))
 	}
-
-	// Custom headers (sanitized, reserved headers skipped with warning)
-	applyCustomHeaders(m, customHeaders, onLog)
-
-	// Build client options
-	opts := buildClientOpts(server, password, onLog)
-
-	client, err := gomail.NewClient(server.SMTP, opts...)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create SMTP client: %w", err)
-	}
-
-	if onLog != nil {
-		client.SetLogger(&smtpLogger{onLog: onLog})
-	}
-
-	if err := client.DialAndSend(m); err != nil {
-		if onLog != nil {
-			onLog("error", fmt.Sprintf("Send failed: %v", err))
+	for _, h := range customHeaders {
+		if h.Key == "" {
+			continue
 		}
+		key := sanitizeHeader(h.Key)
+		value := sanitizeHeader(h.Value)
+		if reservedHeaders[strings.ToLower(key)] {
+			log("warn", fmt.Sprintf("Custom header %q is reserved — skipped", key))
+			continue
+		}
+		headerPart = append(headerPart, []byte(key+": "+value+"\r\n")...)
+	}
+
+	// 5. Reassemble modified EML
+	emlData := append(headerPart, bodyPart...)
+
+	// 6. SMTP connection and raw send
+	addr := fmt.Sprintf("%s:%d", server.SMTP, server.Port)
+	tlsCfg := &tls.Config{
+		ServerName:         server.SMTP,
+		InsecureSkipVerify: server.SkipVerify,
+	}
+	tlsCfg.MinVersion, tlsCfg.MaxVersion = parseTLSVersion(server.TLSVersion)
+
+	var smtpClient *smtp.Client
+
+	if server.SSL {
+		// Implicit SSL: TLS first, then SMTP
+		log("client", fmt.Sprintf("Connecting to %s (SSL/TLS)...", addr))
+		tlsConn, err := tls.DialWithDialer(&net.Dialer{Timeout: 30 * time.Second}, "tcp", addr, tlsCfg)
+		if err != nil {
+			log("error", fmt.Sprintf("SSL connection failed: %v", err))
+			return "", "", fmt.Errorf("SSL connection failed: %w", err)
+		}
+		defer tlsConn.Close()
+		smtpClient, err = smtp.NewClient(tlsConn, server.SMTP)
+		if err != nil {
+			log("error", fmt.Sprintf("SMTP client creation failed: %v", err))
+			return "", "", fmt.Errorf("SMTP client creation failed: %w", err)
+		}
+	} else {
+		// Plain or STARTTLS
+		log("client", fmt.Sprintf("Connecting to %s...", addr))
+		conn, err := net.DialTimeout("tcp", addr, 30*time.Second)
+		if err != nil {
+			log("error", fmt.Sprintf("TCP connection failed: %v", err))
+			return "", "", fmt.Errorf("TCP connection failed: %w", err)
+		}
+		defer conn.Close()
+		smtpClient, err = smtp.NewClient(conn, server.SMTP)
+		if err != nil {
+			log("error", fmt.Sprintf("SMTP client creation failed: %v", err))
+			return "", "", fmt.Errorf("SMTP client creation failed: %w", err)
+		}
+	}
+	defer smtpClient.Quit()
+
+	// EHLO
+	log("client", fmt.Sprintf("EHLO %s", server.SMTP))
+	if err := smtpClient.Hello(server.SMTP); err != nil {
+		log("error", fmt.Sprintf("EHLO failed: %v", err))
+		return "", "", fmt.Errorf("EHLO failed: %w", err)
+	}
+
+	// STARTTLS
+	if server.TLS && !server.SSL {
+		log("client", "STARTTLS")
+		if err := smtpClient.StartTLS(tlsCfg); err != nil {
+			log("error", fmt.Sprintf("STARTTLS failed: %v", err))
+			return "", "", fmt.Errorf("STARTTLS failed: %w", err)
+		}
+		log("info", "TLS connection established")
+	}
+
+	// AUTH
+	if server.Auth && server.AuthID != "" && password != "" {
+		log("client", fmt.Sprintf("AUTH PLAIN %s ****", server.AuthID))
+		auth := smtp.PlainAuth("", server.AuthID, password, server.SMTP)
+		if err := smtpClient.Auth(auth); err != nil {
+			log("error", fmt.Sprintf("AUTH failed: %v", err))
+			return "", "", fmt.Errorf("AUTH failed: %w", err)
+		}
+		log("info", "Authentication successful")
+	}
+
+	// MAIL FROM
+	log("client", fmt.Sprintf("MAIL FROM:<%s>", usedFrom))
+	if err := smtpClient.Mail(usedFrom); err != nil {
+		log("error", fmt.Sprintf("MAIL FROM failed: %v", err))
+		return "", "", fmt.Errorf("MAIL FROM failed: %w", err)
+	}
+
+	// RCPT TO
+	log("client", fmt.Sprintf("RCPT TO:<%s>", usedTo))
+	if err := smtpClient.Rcpt(usedTo); err != nil {
+		log("error", fmt.Sprintf("RCPT TO failed: %v", err))
+		return "", "", fmt.Errorf("RCPT TO failed: %w", err)
+	}
+
+	// DATA
+	log("client", "DATA")
+	writer, err := smtpClient.Data()
+	if err != nil {
+		log("error", fmt.Sprintf("DATA failed: %v", err))
+		return "", "", fmt.Errorf("DATA command failed: %w", err)
+	}
+	if _, err := writer.Write(emlData); err != nil {
+		log("error", fmt.Sprintf("DATA write failed: %v", err))
+		return "", "", fmt.Errorf("DATA write failed: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		log("error", fmt.Sprintf("DATA close failed: %v", err))
 		return "", "", fmt.Errorf("send failed: %w", err)
 	}
+	log("info", "Message sent successfully")
 
 	return usedFrom, usedTo, nil
+}
+
+// splitEMLHeaderBody splits raw EML bytes into header and body parts at the first blank line.
+func splitEMLHeaderBody(raw []byte) (header, body []byte) {
+	// Try \r\n\r\n first (standard), then \n\n
+	if idx := bytes.Index(raw, []byte("\r\n\r\n")); idx >= 0 {
+		return raw[:idx+2], raw[idx+2:] // header includes trailing \r\n, body starts with \r\n
+	}
+	if idx := bytes.Index(raw, []byte("\n\n")); idx >= 0 {
+		return raw[:idx+1], raw[idx+1:]
+	}
+	// No body found — entire file is headers
+	return raw, nil
+}
+
+// extractHeaderValue extracts the value of a header field from the header section bytes.
+// Handles folded headers (continuation lines starting with space/tab).
+func extractHeaderValue(header []byte, name string) string {
+	prefix := strings.ToLower(name) + ":"
+	lines := bytes.Split(header, []byte("\n"))
+	var result string
+	found := false
+	for _, line := range lines {
+		lineStr := strings.TrimRight(string(line), "\r")
+		if found {
+			// Check for folded continuation (starts with space or tab)
+			if len(lineStr) > 0 && (lineStr[0] == ' ' || lineStr[0] == '\t') {
+				result += " " + strings.TrimSpace(lineStr)
+				continue
+			}
+			break
+		}
+		if strings.HasPrefix(strings.ToLower(lineStr), prefix) {
+			result = strings.TrimSpace(lineStr[len(prefix):])
+			found = true
+		}
+	}
+	return result
+}
+
+// replaceOrInsertHeader replaces a header value in the header section, or inserts it if not found.
+// Only operates on the header part (before the first blank line) to avoid modifying nested EML attachments.
+func replaceOrInsertHeader(header []byte, name, value string) []byte {
+	prefix := strings.ToLower(name) + ":"
+	lines := bytes.Split(header, []byte("\n"))
+	var result [][]byte
+	replaced := false
+	skip := false
+	for _, line := range lines {
+		lineStr := strings.TrimRight(string(line), "\r")
+		if skip {
+			// Skip folded continuation lines of the replaced header
+			if len(lineStr) > 0 && (lineStr[0] == ' ' || lineStr[0] == '\t') {
+				continue
+			}
+			skip = false
+		}
+		if !replaced && strings.HasPrefix(strings.ToLower(lineStr), prefix) {
+			result = append(result, []byte(name+": "+value+"\r"))
+			replaced = true
+			skip = true // skip any continuation lines
+			continue
+		}
+		result = append(result, line)
+	}
+	if !replaced {
+		// Insert before the last line (which is empty, marking end of headers)
+		newHeader := []byte(name + ": " + value + "\r\n")
+		header = append(header, newHeader...)
+		return header
+	}
+	return bytes.Join(result, []byte("\n"))
+}
+
+// generateMessageID creates a new unique Message-ID.
+func generateMessageID() string {
+	timestamp := time.Now().UnixNano()
+	// Use base64 of timestamp for a compact unique ID
+	b := make([]byte, 8)
+	for i := 7; i >= 0; i-- {
+		b[i] = byte(timestamp & 0xff)
+		timestamp >>= 8
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(b)
+	return fmt.Sprintf("%s.%d@dmailsender", encoded, time.Now().UnixMicro()%100000)
 }
 
 // buildClientOpts creates common go-mail client options from server config.
@@ -398,7 +558,7 @@ func buildClientOpts(server ServerConfig, password string, onLog func(direction,
 
 // SendOne sends a single mail message according to the given config and index.
 func SendOne(server ServerConfig, password string, mail MailConfig, index int, attachments []string, onLog func(direction, line string)) error {
-	m := gomail.NewMsg()
+	m := gomail.NewMsg(gomail.WithNoDefaultUserAgent())
 
 	// Apply numbering
 	from := mail.MailFrom

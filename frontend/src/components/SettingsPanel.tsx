@@ -150,7 +150,7 @@ export default function SettingsPanel({ config, hasPassword, sendMode, onChange,
               checked={server.ssl && !server.tls}
               onChange={() => updateServer({ ssl: true, tls: false, port: 465 })}
             />
-            <span>Implicit SSL</span>
+            <span>SSL/TLS</span>
           </label>
         </div>
         {(server.tls || server.ssl) && (

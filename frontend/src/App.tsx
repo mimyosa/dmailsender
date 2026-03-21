@@ -456,14 +456,19 @@ function App() {
           {saveMessage && <span className="save-feedback">{saveMessage}</span>}
         </div>
         <div className="toolbar-spacer" />
-        <div className="toolbar-group">
-          <select
-            value={sendMode}
-            onChange={(e) => setSendMode(e.target.value as 'input' | 'eml')}
+        <div className="toolbar-group mode-toggle">
+          <button
+            className={`mode-btn ${sendMode === 'input' ? 'active' : ''}`}
+            onClick={() => setSendMode('input')}
           >
-            <option value="input">Input Mode</option>
-            <option value="eml">EML Mode</option>
-          </select>
+            Input
+          </button>
+          <button
+            className={`mode-btn ${sendMode === 'eml' ? 'active' : ''}`}
+            onClick={() => setSendMode('eml')}
+          >
+            EML
+          </button>
         </div>
         <span className="toolbar-sep" />
         <div className="toolbar-group">

@@ -49,6 +49,13 @@ func (a *AppService) startup(ctx context.Context) {
 // beforeClose is called by Wails before the app closes.
 func (a *AppService) beforeClose(ctx context.Context) bool {
 	a.StopSend()
+
+	// Save window position and size on close
+	w, h := runtime.WindowGetSize(a.ctx)
+	x, y := runtime.WindowGetPosition(a.ctx)
+	a.config.Window = core.WindowState{X: x, Y: y, Width: w, Height: h}
+	_ = core.SaveConfig(a.config)
+
 	return false
 }
 
