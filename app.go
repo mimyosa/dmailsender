@@ -50,11 +50,14 @@ func (a *AppService) startup(ctx context.Context) {
 func (a *AppService) beforeClose(ctx context.Context) bool {
 	a.StopSend()
 
-	// Save window position and size on close
+	// Load last-saved config from disk and update only window state.
+	// This avoids persisting unsaved UI changes (SyncConfig may have
+	// updated a.config in memory without the user pressing Save).
+	saved, _ := core.LoadConfig()
 	w, h := runtime.WindowGetSize(a.ctx)
 	x, y := runtime.WindowGetPosition(a.ctx)
-	a.config.Window = core.WindowState{X: x, Y: y, Width: w, Height: h}
-	_ = core.SaveConfig(a.config)
+	saved.Window = core.WindowState{X: x, Y: y, Width: w, Height: h}
+	_ = core.SaveConfig(saved)
 
 	return false
 }
@@ -372,14 +375,6 @@ func (a *AppService) IsSending() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.sending
-}
-
-// --- Window State ---
-
-// SaveWindowState persists the window position and size.
-func (a *AppService) SaveWindowState(ws core.WindowState) error {
-	a.config.Window = ws
-	return core.SaveConfig(a.config)
 }
 
 // --- EML Mode ---

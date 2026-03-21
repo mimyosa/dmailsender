@@ -8,7 +8,6 @@ import {
   StartSend,
   StopSend,
   ClearLog,
-  SaveWindowState,
   SelectEMLFiles,
   GetConfigPath,
   LoadConfigFrom,
@@ -212,27 +211,6 @@ function App() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [config, sending, hasPassword]);
-
-  // Save window state on resize
-  useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout>;
-    const handler = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        SaveWindowState({
-          x: window.screenX,
-          y: window.screenY,
-          width: window.outerWidth,
-          height: window.outerHeight,
-        } as core.WindowState);
-      }, 500);
-    };
-    window.addEventListener('resize', handler);
-    return () => {
-      window.removeEventListener('resize', handler);
-      clearTimeout(timeout);
-    };
-  }, []);
 
   const handleSave = useCallback(async () => {
     try {

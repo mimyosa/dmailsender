@@ -105,6 +105,9 @@ jobs:
             - **Window state saved on close** — Size and position are always saved when the app exits
             - **Window state restored on launch** — Next launch restores the saved window size and position
 
+            ### Bug Fixes
+            - **Config save protection** — Unsaved UI changes no longer persist to disk on close (only window state is saved; config requires explicit Save)
+
             ### Security (from previous session)
             - **Data race fix** — `lastSent`/`lastFailed` counters now use `atomic.Int64` for thread safety
             - **Password removed from frontend state** — Password is saved directly to OS keychain and cleared from memory immediately
