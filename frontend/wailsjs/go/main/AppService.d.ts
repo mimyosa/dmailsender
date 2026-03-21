@@ -32,8 +32,6 @@ export function SaveConfig(arg1:core.AppConfig):Promise<void>;
 
 export function SavePassword(arg1:string,arg2:string):Promise<void>;
 
-export function SaveWindowState(arg1:core.WindowState):Promise<void>;
-
 export function SelectAttachments():Promise<Array<string>>;
 
 export function SelectEMLFiles():Promise<Array<string>>;

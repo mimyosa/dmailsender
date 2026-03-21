@@ -62,10 +62,6 @@ export function SavePassword(arg1, arg2) {
   return window['go']['main']['AppService']['SavePassword'](arg1, arg2);
 }
 
-export function SaveWindowState(arg1) {
-  return window['go']['main']['AppService']['SaveWindowState'](arg1);
-}
-
 export function SelectAttachments() {
   return window['go']['main']['AppService']['SelectAttachments']();
 }
