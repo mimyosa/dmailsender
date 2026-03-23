@@ -26,8 +26,8 @@ export function GetVersion() {
   return window['go']['main']['AppService']['GetVersion']();
 }
 
-export function HasPassword(arg1) {
-  return window['go']['main']['AppService']['HasPassword'](arg1);
+export function HasPassword() {
+  return window['go']['main']['AppService']['HasPassword']();
 }
 
 export function IsSending() {
@@ -40,10 +40,6 @@ export function LoadConfig() {
 
 export function LoadConfigFrom() {
   return window['go']['main']['AppService']['LoadConfigFrom']();
-}
-
-export function LoadPassword(arg1) {
-  return window['go']['main']['AppService']['LoadPassword'](arg1);
 }
 
 export function ParseEMLPreview(arg1) {

@@ -2,11 +2,10 @@ package core
 
 import "fmt"
 
-// ValidateServerConfig checks the server config and returns a list of error messages.
-// Only checks required fields and range constraints.
-func ValidateServerConfig(cfg ServerConfig) []string {
-	var errs []string
-
+// ValidateServerConfig checks the server config and returns errors (blocking)
+// and warnings (non-blocking). Errors prevent sending; warnings are informational
+// (the frontend shows them via a confirmation dialog before calling Send).
+func ValidateServerConfig(cfg ServerConfig) (errs []string, warns []string) {
 	if cfg.SMTP == "" {
 		errs = append(errs, "SMTP host is required")
 	}
@@ -24,19 +23,17 @@ func ValidateServerConfig(cfg ServerConfig) []string {
 			errs = append(errs, "Auth ID is required when auth is enabled")
 		}
 		if !cfg.TLS && !cfg.SSL {
-			errs = append(errs, "WARNING: AUTH is enabled without TLS/SSL — credentials will be sent in plaintext")
+			errs = append(errs, "AUTH requires TLS or SSL — plaintext AUTH is not supported")
 		}
 	}
 
-	return errs
+	return errs, warns
 }
 
-// ValidateMailConfig checks the mail config and returns a list of error messages.
-// Only checks range constraints. Email format is NOT validated — the user needs to
+// ValidateMailConfig checks the mail config and returns errors (blocking)
+// and warnings (non-blocking). Email format is NOT validated — the user needs to
 // test how mail servers handle invalid or empty addresses.
-func ValidateMailConfig(cfg MailConfig) []string {
-	var errs []string
-
+func ValidateMailConfig(cfg MailConfig) (errs []string, warns []string) {
 	if cfg.MailNumber < 1 || cfg.MailNumber > 100000 {
 		errs = append(errs, fmt.Sprintf("Mail Number must be 1–100,000, got %d", cfg.MailNumber))
 	}
@@ -53,5 +50,13 @@ func ValidateMailConfig(cfg MailConfig) []string {
 		errs = append(errs, "Content-Type must be text/plain or text/html")
 	}
 
-	return errs
+	if cfg.MailNumber >= 100 {
+		warns = append(warns, fmt.Sprintf("Sending %d mails — please confirm", cfg.MailNumber))
+	}
+
+	if cfg.ThreadNumber > 50 {
+		warns = append(warns, fmt.Sprintf("Thread count %d exceeds 50 — may overload the server", cfg.ThreadNumber))
+	}
+
+	return errs, warns
 }

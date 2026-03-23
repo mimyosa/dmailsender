@@ -100,7 +100,7 @@ function App() {
         setTheme(cfg.theme);
       }
       if (cfg.server.auth && cfg.server.auth_id) {
-        HasPassword(cfg.server.auth_id).then(setHasPassword).catch(() => {});
+        HasPassword().then(setHasPassword).catch(() => {});
       }
     });
     GetConfigPath().then(setConfigPath).catch(() => {});
@@ -225,7 +225,7 @@ function App() {
       const cfg = await LoadConfigFrom();
       setConfig(cfg);
       if (cfg.server.auth && cfg.server.auth_id) {
-        HasPassword(cfg.server.auth_id).then(setHasPassword).catch(() => {});
+        HasPassword().then(setHasPassword).catch(() => {});
       }
     } catch (e) {
       showStatus('Load failed: ' + e);
@@ -240,6 +240,7 @@ function App() {
       // Server validation
       if (!config.server.smtp.trim()) errors.push('SMTP host is required');
       if (config.server.port < 1 || config.server.port > 65535) errors.push('Port must be 1–65535');
+      if (config.server.tls && config.server.ssl) errors.push('TLS and SSL cannot both be enabled');
       if (config.server.auth) {
         if (!config.server.auth_id.trim()) errors.push('Auth ID is required when AUTH is enabled');
         if (!hasPassword) errors.push('Password is required when AUTH is enabled');
@@ -256,6 +257,7 @@ function App() {
       if (config.mail.mail_number < 1 || config.mail.mail_number > 100000) errors.push('Count must be 1–100,000');
       if (config.mail.thread_number < 1) errors.push('Threads must be at least 1');
       if (config.mail.interval_ms < 0 || config.mail.interval_ms > 60000) errors.push('Interval must be 0–60,000 ms');
+      if (config.mail.content_type && config.mail.content_type !== 'text/plain' && config.mail.content_type !== 'text/html') errors.push('Content-Type must be text/plain or text/html');
 
       if (errors.length > 0) {
         showStatus(errors[0]);
@@ -282,9 +284,6 @@ function App() {
       }
       if (config.mail.thread_number > 50) {
         warnings.push(`스레드 수가 ${config.mail.thread_number}개로 설정되어 있습니다. 서버에 부하가 발생할 수 있습니다.`);
-      }
-      if (config.server.auth && !config.server.tls && !config.server.ssl) {
-        warnings.push(`TLS/SSL 없이 AUTH를 사용합니다. 자격 증명이 평문으로 전송됩니다.`);
       }
 
       if (warnings.length > 0) {

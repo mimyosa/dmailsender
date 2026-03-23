@@ -44,6 +44,9 @@ func (a *AppService) startup(ctx context.Context) {
 		runtime.LogWarningf(ctx, "Failed to load config: %v", err)
 	}
 	a.config = cfg
+
+	// Migrate keychain from old per-authID key to fixed key (one-time)
+	core.MigrateKeychain(cfg.Server.AuthID)
 }
 
 // beforeClose is called by Wails before the app closes.
@@ -100,17 +103,9 @@ func (a *AppService) SavePassword(authID, password string) error {
 	return core.SavePassword(authID, password)
 }
 
-// LoadPassword retrieves a password from the OS keychain.
-func (a *AppService) LoadPassword(authID string) (string, error) {
-	return core.LoadPassword(authID)
-}
-
-// HasPassword checks whether a password exists in the OS keychain for the given auth ID.
-func (a *AppService) HasPassword(authID string) bool {
-	if authID == "" {
-		return false
-	}
-	pw, err := core.LoadPassword(authID)
+// HasPassword checks whether a password exists in the OS keychain.
+func (a *AppService) HasPassword() bool {
+	_, pw, err := core.LoadPassword()
 	return err == nil && pw != ""
 }
 
@@ -185,14 +180,14 @@ func (a *AppService) StartSend() error {
 	a.sending = true
 	a.mu.Unlock()
 
-	// Validate
-	if errs := core.ValidateServerConfig(a.config.Server); len(errs) > 0 {
+	// Validate (warnings already confirmed by frontend dialog)
+	if errs, _ := core.ValidateServerConfig(a.config.Server); len(errs) > 0 {
 		a.mu.Lock()
 		a.sending = false
 		a.mu.Unlock()
 		return fmt.Errorf("server config error: %s", strings.Join(errs, "; "))
 	}
-	if errs := core.ValidateMailConfig(a.config.Mail); len(errs) > 0 {
+	if errs, _ := core.ValidateMailConfig(a.config.Mail); len(errs) > 0 {
 		a.mu.Lock()
 		a.sending = false
 		a.mu.Unlock()
@@ -202,12 +197,12 @@ func (a *AppService) StartSend() error {
 	// Load password from keychain
 	var password string
 	if a.config.Server.Auth {
-		pw, err := core.LoadPassword(a.config.Server.AuthID)
-		if err != nil {
+		_, pw, err := core.LoadPassword()
+		if err != nil || pw == "" {
 			a.mu.Lock()
 			a.sending = false
 			a.mu.Unlock()
-			return fmt.Errorf("failed to load password: %w", err)
+			return fmt.Errorf("password not found — please enter password in Settings")
 		}
 		password = pw
 	}
@@ -281,7 +276,7 @@ func (a *AppService) StartSendEML(emlFiles []string, from, rcpt string, numberin
 		return fmt.Errorf("no EML files selected")
 	}
 
-	if errs := core.ValidateServerConfig(a.config.Server); len(errs) > 0 {
+	if errs, _ := core.ValidateServerConfig(a.config.Server); len(errs) > 0 {
 		a.mu.Lock()
 		a.sending = false
 		a.mu.Unlock()
@@ -290,12 +285,12 @@ func (a *AppService) StartSendEML(emlFiles []string, from, rcpt string, numberin
 
 	var password string
 	if a.config.Server.Auth {
-		pw, err := core.LoadPassword(a.config.Server.AuthID)
-		if err != nil {
+		_, pw, err := core.LoadPassword()
+		if err != nil || pw == "" {
 			a.mu.Lock()
 			a.sending = false
 			a.mu.Unlock()
-			return fmt.Errorf("failed to load password: %w", err)
+			return fmt.Errorf("password not found — please enter password in Settings")
 		}
 		password = pw
 	}

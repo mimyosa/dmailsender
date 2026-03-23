@@ -30,9 +30,14 @@ export default function SettingsPanel({ config, hasPassword, sendMode, onChange,
   useEffect(() => setIntervalText(String(mail.interval_ms)), [mail.interval_ms]);
 
   const updateServer = (patch: Partial<core.ServerConfig>) => {
+    const merged = { ...server, ...patch };
+    // Auto-disable AUTH when TLS/SSL are both off
+    if (!merged.tls && !merged.ssl && merged.auth) {
+      merged.auth = false;
+    }
     onChange(new core.AppConfig({
       ...config,
-      server: new core.ServerConfig({ ...server, ...patch }),
+      server: new core.ServerConfig(merged),
     }));
   };
 
@@ -177,18 +182,17 @@ export default function SettingsPanel({ config, hasPassword, sendMode, onChange,
             <input
               type="checkbox"
               checked={server.auth}
+              disabled={!server.tls && !server.ssl}
               onChange={(e) => updateServer({ auth: e.target.checked })}
             />
             <span className="slider" />
           </label>
+          {!server.tls && !server.ssl && (
+            <span className="s-hint">TLS/SSL required</span>
+          )}
         </div>
         {server.auth && (
           <>
-            {!server.tls && !server.ssl && (
-              <div className="s-warning">
-                ⚠ TLS/SSL 없이 AUTH 사용 시 자격 증명이 평문으로 전송됩니다.
-              </div>
-            )}
             <div className="s-field">
               <label>Auth ID</label>
               <input

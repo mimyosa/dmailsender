@@ -105,6 +105,13 @@ jobs:
             - **Window state saved on close** — Size and position are always saved when the app exits
             - **Window state restored on launch** — Next launch restores the saved window size and position
 
+            ### Validation & Auth
+            - **Frontend/Backend validation consistency** — Both sides now return `(errors, warnings)` separately; errors block, warnings confirm
+            - **AUTH send bug fixed** — AUTH-related warnings were incorrectly blocking sends; now properly classified as errors vs warnings
+            - **Keychain key fixed** — Auth credentials stored under fixed key (`smtp_auth_credentials`) with JSON payload; Auth ID changes no longer cause "secret not found"
+            - **Keychain migration** — Existing credentials auto-migrated on startup
+            - **No TLS + AUTH blocked in UI** — AUTH toggle auto-disabled when TLS/SSL are off; impossible combination prevented at UI level
+
             ### Bug Fixes
             - **Config save protection** — Unsaved UI changes no longer persist to disk on close (only window state is saved; config requires explicit Save)
 

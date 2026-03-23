@@ -14,15 +14,13 @@ export function GetConfigPath():Promise<string>;
 
 export function GetVersion():Promise<string>;
 
-export function HasPassword(arg1:string):Promise<boolean>;
+export function HasPassword():Promise<boolean>;
 
 export function IsSending():Promise<boolean>;
 
 export function LoadConfig():Promise<core.AppConfig>;
 
 export function LoadConfigFrom():Promise<core.AppConfig>;
-
-export function LoadPassword(arg1:string):Promise<string>;
 
 export function ParseEMLPreview(arg1:string):Promise<core.EMLPreview>;
 

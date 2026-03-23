@@ -11,6 +11,7 @@ import (
 const (
 	appName        = "dMailSender"
 	keyringService = "dMailSender"
+	keyringUser    = "smtp_auth_credentials"
 )
 
 // ConfigDir returns the platform config directory for the app.
@@ -99,17 +100,56 @@ func unmarshalConfig(data []byte) (AppConfig, error) {
 	return cfg, err
 }
 
-// SavePassword stores a password in the OS keychain.
+// smtpCredentials is the JSON structure stored in the OS keychain.
+type smtpCredentials struct {
+	ID string `json:"id"`
+	PW string `json:"pw"`
+}
+
+// SavePassword stores auth ID and password as JSON in the OS keychain under a fixed key.
 func SavePassword(authID, password string) error {
-	return keyring.Set(keyringService, authID, password)
+	data, err := json.Marshal(smtpCredentials{ID: authID, PW: password})
+	if err != nil {
+		return err
+	}
+	return keyring.Set(keyringService, keyringUser, string(data))
 }
 
-// LoadPassword retrieves a password from the OS keychain.
-func LoadPassword(authID string) (string, error) {
-	return keyring.Get(keyringService, authID)
+// LoadPassword retrieves auth ID and password from the OS keychain.
+func LoadPassword() (authID, password string, err error) {
+	raw, err := keyring.Get(keyringService, keyringUser)
+	if err != nil {
+		return "", "", err
+	}
+	var cred smtpCredentials
+	if err := json.Unmarshal([]byte(raw), &cred); err != nil {
+		return "", "", err
+	}
+	return cred.ID, cred.PW, nil
 }
 
-// DeletePassword removes a password from the OS keychain.
-func DeletePassword(authID string) error {
-	return keyring.Delete(keyringService, authID)
+// DeletePassword removes the stored credentials from the OS keychain.
+func DeletePassword() error {
+	return keyring.Delete(keyringService, keyringUser)
+}
+
+// MigrateKeychain migrates credentials from the old per-authID key to the new fixed key.
+// Called once at startup. If the new key already exists, migration is skipped.
+func MigrateKeychain(oldAuthID string) {
+	if oldAuthID == "" {
+		return
+	}
+	// Already migrated?
+	if _, _, err := LoadPassword(); err == nil {
+		return
+	}
+	// Try loading from old key
+	pw, err := keyring.Get(keyringService, oldAuthID)
+	if err != nil || pw == "" {
+		return
+	}
+	// Save to new key
+	_ = SavePassword(oldAuthID, pw)
+	// Clean up old key
+	_ = keyring.Delete(keyringService, oldAuthID)
 }
