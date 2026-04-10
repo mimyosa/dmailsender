@@ -123,40 +123,33 @@ func tlsVersionName(v uint16) string {
 	}
 }
 
-// digitSuffix matches trailing digits before @ in an email address.
-var digitSuffix = regexp.MustCompile(`(\d+)(@.+)$`)
-
-// applyNumbering replaces trailing digits before @ with the given index,
-// preserving the original digit width with zero-padding.
-// If no digits exist, the index is inserted before @.
+// applyNumbering appends "-{index}" to the local part of an email address (before @).
+// It never modifies existing characters — the original address is preserved intact.
+// Examples:
+//
+//	"user@example.com"       + 5 -> "user-5@example.com"
+//	"user001@example.com"    + 5 -> "user001-5@example.com"
+//	"aimaya2@jiran.com"      + 0 -> "aimaya2-0@jiran.com"
+//	"no-at-sign"             + 3 -> "no-at-sign-3"
 func applyNumbering(addr string, index int) string {
-	if digitSuffix.MatchString(addr) {
-		return digitSuffix.ReplaceAllStringFunc(addr, func(match string) string {
-			parts := digitSuffix.FindStringSubmatch(match)
-			width := len(parts[1])
-			return fmt.Sprintf("%0*d%s", width, index, parts[2])
-		})
-	}
-
-	// No digits found: insert index before @
+	suffix := "-" + strconv.Itoa(index)
 	atIdx := strings.LastIndex(addr, "@")
 	if atIdx == -1 {
-		return addr + strconv.Itoa(index)
+		return addr + suffix
 	}
-	return addr[:atIdx] + strconv.Itoa(index) + addr[atIdx:]
+	return addr[:atIdx] + suffix + addr[atIdx:]
 }
 
-// applyNumberingSubject replaces trailing digits in the subject with the index.
-var digitEnd = regexp.MustCompile(`(\d+)$`)
-
+// applyNumberingSubject appends "-{index}" to the subject.
+// It never modifies existing characters, so years, version numbers, and other
+// trailing digits in the subject are preserved.
+// Examples:
+//
+//	"Test Message"  + 5 -> "Test Message-5"
+//	"Report 2024"   + 5 -> "Report 2024-5"
+//	"Version 1.2"   + 5 -> "Version 1.2-5"
 func applyNumberingSubject(subject string, index int) string {
-	if digitEnd.MatchString(subject) {
-		return digitEnd.ReplaceAllStringFunc(subject, func(match string) string {
-			width := len(match)
-			return fmt.Sprintf("%0*d", width, index)
-		})
-	}
-	return subject + strconv.Itoa(index)
+	return subject + "-" + strconv.Itoa(index)
 }
 
 // parseTLSVersion returns min and max TLS version from a string like "1.0", "1.2", "1.3".
@@ -255,6 +248,20 @@ func applyCustomHeaders(m *gomail.Msg, headers []Header, onLog func(direction, l
 	}
 }
 
+// parseRecipients splits a comma/semicolon-separated recipient string into individual addresses.
+func parseRecipients(rcptTo string) []string {
+	normalized := strings.ReplaceAll(rcptTo, ";", ",")
+	parts := strings.Split(normalized, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
 // extractAddr extracts the bare email address from a header value like "Display Name <addr@example.com>".
 // If parsing fails, returns the original string as-is.
 func extractAddr(raw string) string {
@@ -270,7 +277,7 @@ func extractAddr(raw string) string {
 // Unlike the old SendEML (which parsed and reassembled via go-mail), this preserves the
 // original EML content exactly — MIME structure, attachments, boundaries, and nested EMLs.
 // Only Message-ID and custom headers are modified at the byte level in the header section.
-func SendEMLRaw(server ServerConfig, password string, from, rcpt, emlPath string, useHeaderEnvelope bool, updateMessageID bool, customHeaders []Header, onLog func(direction, line string)) (usedFrom, usedTo string, err error) {
+func SendEMLRaw(server ServerConfig, password string, from, rcpt, emlPath string, useHeaderEnvelope bool, updateMessageID bool, numberingFrom, numberingTo bool, index int, customHeaders []Header, onLog func(direction, line string)) (usedFrom, usedTo string, err error) {
 	log := func(dir, msg string) {
 		if onLog != nil {
 			onLog(dir, msg)
@@ -298,8 +305,26 @@ func SendEMLRaw(server ServerConfig, password string, from, rcpt, emlPath string
 			return "", "", fmt.Errorf("EML file has no To header — cannot use header envelope")
 		}
 		usedFrom = extractAddr(emlFrom)
-		usedTo = extractAddr(emlTo)
+		usedTo = emlTo // keep full string; parseRecipients() will split later for RCPT TO
 		log("info", fmt.Sprintf("Using header envelope: From=%q, To=%q", usedFrom, usedTo))
+
+		// Apply numbering to header-extracted addresses (Option A).
+		// Option C: log an info line whenever numbering mutates the envelope.
+		if numberingFrom {
+			orig := usedFrom
+			usedFrom = applyNumbering(usedFrom, index)
+			log("info", fmt.Sprintf("Numbering applied to header envelope From: %q -> %q", orig, usedFrom))
+		}
+		if numberingTo {
+			parts := parseRecipients(usedTo)
+			for i, r := range parts {
+				bare := extractAddr(r)
+				parts[i] = applyNumbering(bare, index)
+			}
+			newTo := strings.Join(parts, ", ")
+			log("info", fmt.Sprintf("Numbering applied to header envelope To: %q -> %q", usedTo, newTo))
+			usedTo = newTo
+		}
 	} else {
 		if from == "" {
 			return "", "", fmt.Errorf("From address is required when Use Header Envelope is off")
@@ -410,11 +435,18 @@ func SendEMLRaw(server ServerConfig, password string, from, rcpt, emlPath string
 		return "", "", fmt.Errorf("MAIL FROM failed: %w", err)
 	}
 
-	// RCPT TO
-	log("client", fmt.Sprintf("RCPT TO:<%s>", usedTo))
-	if err := smtpClient.Rcpt(usedTo); err != nil {
-		log("error", fmt.Sprintf("RCPT TO failed: %v", err))
-		return "", "", fmt.Errorf("RCPT TO failed: %w", err)
+	// RCPT TO (supports multiple recipients)
+	rcpts := parseRecipients(usedTo)
+	if len(rcpts) == 0 {
+		return "", "", fmt.Errorf("To address is required")
+	}
+	for _, r := range rcpts {
+		addr := extractAddr(r)
+		log("client", fmt.Sprintf("RCPT TO:<%s>", addr))
+		if err := smtpClient.Rcpt(addr); err != nil {
+			log("error", fmt.Sprintf("RCPT TO failed for %s: %v", addr, err))
+			return "", "", fmt.Errorf("RCPT TO failed for %s: %w", addr, err)
+		}
 	}
 
 	// DATA
@@ -525,7 +557,6 @@ func generateMessageID() string {
 // buildClientOpts creates common go-mail client options from server config.
 func buildClientOpts(server ServerConfig, password string, onLog func(direction, line string)) []gomail.Option {
 	var opts []gomail.Option
-	opts = append(opts, gomail.WithPort(server.Port))
 
 	tlsCfg := &tls.Config{
 		ServerName:         server.SMTP,
@@ -542,6 +573,9 @@ func buildClientOpts(server ServerConfig, password string, onLog func(direction,
 	} else {
 		opts = append(opts, gomail.WithTLSPortPolicy(gomail.NoTLS))
 	}
+
+	// WithPort must come AFTER WithSSLPort to prevent go-mail from overriding the user-configured port to 465.
+	opts = append(opts, gomail.WithPort(server.Port))
 
 	if server.Auth && server.AuthID != "" && password != "" {
 		opts = append(opts, gomail.WithSMTPAuth(gomail.SMTPAuthPlain))
@@ -566,17 +600,20 @@ func SendOne(server ServerConfig, password string, mail MailConfig, index int, a
 		from = applyNumbering(from, index)
 	}
 
-	rcpt := mail.RcptTo
+	// Parse recipients first, then apply numbering to each individually
+	rcpts := parseRecipients(mail.RcptTo)
+	if len(rcpts) == 0 {
+		return fmt.Errorf("To address is required")
+	}
 	if mail.NumberingRcptTo {
-		rcpt = applyNumbering(rcpt, index)
+		for i, r := range rcpts {
+			rcpts[i] = applyNumbering(r, index)
+		}
 	}
 
-	// From/To are always required in Input mode
+	// From is always required in Input mode
 	if from == "" {
 		return fmt.Errorf("From address is required")
-	}
-	if rcpt == "" {
-		return fmt.Errorf("To address is required")
 	}
 
 	subject := mail.Subject
@@ -590,7 +627,7 @@ func SendOne(server ServerConfig, password string, mail MailConfig, index int, a
 	if err := m.From(from); err != nil {
 		return fmt.Errorf("invalid from address: %w", err)
 	}
-	if err := m.To(rcpt); err != nil {
+	if err := m.To(rcpts...); err != nil {
 		return fmt.Errorf("invalid to address: %w", err)
 	}
 	m.Subject(subject)

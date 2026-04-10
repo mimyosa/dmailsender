@@ -3,15 +3,16 @@
    ======================================== */
 :root,
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg-primary: #1e1e2e;
   --bg-secondary: #181825;
   --bg-tertiary: #11111b;
   --bg-input: #11111b;
-  --border: #313244;
+  --border: #45475a;
   --border-focus: #89b4fa;
   --text-primary: #cdd6f4;
-  --text-secondary: #6c7086;
-  --text-muted: #585b70;
+  --text-secondary: #a6adc8;
+  --text-muted: #7f849c;
   --accent: #89b4fa;
   --accent-hover: #74a8f7;
   --btn-bg: #313244;
@@ -32,15 +33,16 @@
    CSS Variables: Light theme
    ======================================== */
 [data-theme="light"] {
+  color-scheme: light;
   --bg-primary: #eff1f5;
   --bg-secondary: #e6e9ef;
   --bg-tertiary: #dce0e8;
   --bg-input: #ffffff;
   --border: #ccd0da;
   --border-focus: #1e66f5;
-  --text-primary: #4c4f69;
-  --text-secondary: #7c7f93;
-  --text-muted: #9ca0b0;
+  --text-primary: #303347;
+  --text-secondary: #5c5f77;
+  --text-muted: #6c6f85;
   --accent: #1e66f5;
   --accent-hover: #1a5ce0;
   --btn-bg: #ccd0da;
@@ -350,6 +352,11 @@ html, body {
 .s-field input:focus,
 .s-field select:focus {
   border-color: var(--border-focus);
+}
+
+.s-field select option {
+  background: var(--bg-input);
+  color: var(--text-primary);
 }
 
 /* Remove number input spinners */

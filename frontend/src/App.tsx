@@ -84,6 +84,7 @@ function App() {
   const [progress, setProgress] = useState<ProgressEvent>({ sent: 0, failed: 0, total: 0 });
   const [results, setResults] = useState<SendResultItem[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [bottomTab, setBottomTab] = useState<'results' | 'log'>('results');
 
   const isEml = sendMode === 'eml';
 
@@ -203,14 +204,15 @@ function App() {
       } else if (e.ctrlKey && e.key === 's') {
         e.preventDefault();
         handleSave();
-      } else if (e.ctrlKey && e.key === 'l') {
+      } else if (e.ctrlKey && !e.shiftKey && e.key === 'l') {
         e.preventDefault();
-        handleClearLog();
+        if (bottomTab === 'log') handleClearLog();
+        else handleClearResults();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [config, sending, hasPassword]);
+  }, [config, sending, hasPassword, bottomTab]);
 
   const handleSave = useCallback(async () => {
     try {
@@ -619,6 +621,8 @@ function App() {
             sending={sending}
             onClearLog={handleClearLog}
             onClearResults={handleClearResults}
+            activeTab={bottomTab}
+            onTabChange={setBottomTab}
           />
         </div>
       </div>

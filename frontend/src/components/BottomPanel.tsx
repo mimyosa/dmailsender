@@ -29,10 +29,11 @@ interface Props {
   sending: boolean;
   onClearLog: () => void;
   onClearResults: () => void;
+  activeTab: 'results' | 'log';
+  onTabChange: (tab: 'results' | 'log') => void;
 }
 
-export default function BottomPanel({ logs, results, progress, sending, onClearLog, onClearResults }: Props) {
-  const [activeTab, setActiveTab] = useState<'log' | 'results'>('results');
+export default function BottomPanel({ logs, results, progress, sending, onClearLog, onClearResults, activeTab, onTabChange }: Props) {
   const [panelHeight, setPanelHeight] = useState(180);
   const logRef = useRef<HTMLDivElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -93,13 +94,13 @@ export default function BottomPanel({ logs, results, progress, sending, onClearL
       <div className="bottom-tabs">
         <div
           className={`bottom-tab ${activeTab === 'results' ? 'active' : ''}`}
-          onClick={() => setActiveTab('results')}
+          onClick={() => onTabChange('results')}
         >
           Results {results.length > 0 ? `(${results.length})` : ''}
         </div>
         <div
           className={`bottom-tab ${activeTab === 'log' ? 'active' : ''}`}
-          onClick={() => setActiveTab('log')}
+          onClick={() => onTabChange('log')}
         >
           SMTP Log
         </div>

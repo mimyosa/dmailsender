@@ -6,13 +6,14 @@
 
 ## Latest Version
 
-**v0.5** — [Releases](https://github.com/mimyosa/dmailsender/releases)
+**v0.7** — [Releases](https://github.com/mimyosa/dmailsender/releases)
 
 ## Features
 
 - **SMTP 메일 발송** — TLS (STARTTLS) / SSL (Implicit) / 평문 지원, TLS 버전 선택 (1.0~1.3)
 - **다중 스레드 전송** — 최대 50개 동시 전송, 전송 간격(ms) 설정
-- **넘버링** — From/To/Subject 자동 증분 (예: `user001@example.com` → `user002@...`)
+- **넘버링** — From/To/Subject 끝에 `-{N}` 자동 append (예: `user@example.com` → `user-0@example.com`, 연도/버전/도메인 숫자 안전 보존)
+- **동보 메일** — To 필드에 콤마 또는 세미콜론으로 다수 수신자 입력 가능, Input/EML 모드 모두 지원
 - **타임스탬프** — Subject에 발송 시간 자동 추가
 - **EML 모드** — `.eml` 파일 로드, MIME 디코딩 프리뷰, 대량 전송
 - **파일 첨부** — Input 모드에서 다중 파일 첨부 지원

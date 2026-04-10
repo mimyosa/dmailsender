@@ -60,7 +60,7 @@ export default function EditorHeader({ config, onChange, envelopeDisabled, conte
               type="text"
               value={mail.rcpt_to}
               onChange={(e) => update({ rcpt_to: e.target.value }, true)}
-              placeholder="recipient@example.com"
+              placeholder="recipient@example.com (콤마로 다수 입력 가능)"
               disabled={envelopeDisabled}
             />
             <div className="field-opts">

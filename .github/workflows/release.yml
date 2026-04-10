@@ -85,41 +85,32 @@ jobs:
           body: |
             ## What's New in ${{ github.ref_name }}
 
-            ### UI Improvements
-            - **Envelope opt-chip buttons redesigned** — `#` → `#Num`, `TS` → `Time` with larger size for better readability
-            - **From ↔ To Swap button** — One-click swap between sender and recipient addresses (vertical button spanning both rows)
-            - **Input/EML mode toggle** — Dropdown replaced with toggle button group for faster switching
-            - **Rename Implicit SSL → SSL/TLS** — Clearer connection mode label
-            - **Smaller default window** — Minimum size reduced from 1024×720 to 880×620
-            - **Timestamps on Results & SMTP Log** — Every log entry now shows `HH:MM:SS` timestamp (measured at backend event time)
-            - **Send Start / Stop / Done logs** — Results tab now records when sending starts, stops, and completes with details
+            ### Broadcast Mail (동보메일)
+            - **Multiple recipients in To field** — Comma or semicolon separated addresses are now parsed into individual RCPT TO commands, supported in both Input and EML modes
+            - **Per-recipient numbering** — `#Num` option now applies to each recipient individually (previously broken for broadcast lists)
 
-            ### SMTP & Send
-            - **EML mode: raw sending via net/smtp** — EML files are now sent as-is, preserving original MIME structure, attachments, and boundaries exactly
-            - **TLS version pinning** — Selected TLS version is now used exactly (e.g., TLS 1.2 only), not as a minimum
-            - **Remove default User-Agent/X-Mailer headers** — go-mail's default headers no longer added in Input mode
-            - **Send failure errors in SMTP Log** — SMTP errors now appear in the SMTP Log tab, not just Results
-            - **Mail index prefix `[#N]`** — Each SMTP log line is tagged with its mail index for easy correlation with Results tab
+            ### Numbering Logic Rewritten
+            - **Simpler, predictable behavior** — Numbering no longer uses regex-based digit replacement; it always appends `-{N}` to the end
+              - Email: `user@example.com` → `user-5@example.com`, `user001@example.com` → `user001-5@example.com`
+              - Subject: `Report 2024` → `Report 2024-5` (years, versions, domain digits fully preserved)
+            - **Domain/IP safe** — `user@jiran2.com`, `user@192.168.1.1`, unicode local parts all handled correctly
+            - **NUM + Timestamp ordering** — Combined form is `{subject}-{N} ({timestamp})`
 
-            ### Window
-            - **Window state saved on close** — Size and position are always saved when the app exits
-            - **Window state restored on launch** — Next launch restores the saved window size and position
+            ### EML Mode Improvements
+            - **Numbering works with "Use Header Envelope"** — Previously silently ignored when the header envelope mode was active; now numbering is applied to the addresses extracted from the EML headers and logged to SMTP Log for traceability
+            - **EML override path broadcast + numbering fix** — The override path now parses broadcast lists and applies numbering per-recipient
 
-            ### Validation & Auth
-            - **Frontend/Backend validation consistency** — Both sides now return `(errors, warnings)` separately; errors block, warnings confirm
-            - **AUTH send bug fixed** — AUTH-related warnings were incorrectly blocking sends; now properly classified as errors vs warnings
-            - **Keychain key fixed** — Auth credentials stored under fixed key (`smtp_auth_credentials`) with JSON payload; Auth ID changes no longer cause "secret not found"
-            - **Keychain migration** — Existing credentials auto-migrated on startup
-            - **No TLS + AUTH blocked in UI** — AUTH toggle auto-disabled when TLS/SSL are off; impossible combination prevented at UI level
+            ### UI
+            - **Dark/Light mode readability** — Added `color-scheme` declaration for proper WebView2 form element theming, adjusted secondary/muted text colors in dark mode (brighter) and primary/secondary/muted in light mode (darker) for improved contrast
+            - **To field placeholder** — Updated to indicate multiple recipients are supported
+            - **Ctrl+L clears the active bottom tab** — Previously only cleared the SMTP Log tab regardless of which tab was focused; now it clears whichever tab is currently active (Results or SMTP Log), with the `activeTab` state lifted to App level
 
             ### Bug Fixes
-            - **Config save protection** — Unsaved UI changes no longer persist to disk on close (only window state is saved; config requires explicit Save)
+            - **SSL/TLS port override fix** — In SSL/TLS mode, the configured port was being forcibly overridden to 465 because `WithPort` was called before `WithSSLPort` in go-mail option ordering; fixed by reordering so `WithPort` is applied last
 
-            ### Security (from previous session)
-            - **Data race fix** — `lastSent`/`lastFailed` counters now use `atomic.Int64` for thread safety
-            - **Password removed from frontend state** — Password is saved directly to OS keychain and cleared from memory immediately
-            - **Test Connection no longer saves config** — Test button now syncs to memory only
+            ### Tests
+            - **72 edge case tests added** — Numbering, broadcast parsing, subject composition, EML header envelope numbering (including display names, IPv4 literal domains, unicode, multi-recipient headers, and regression cases for all bugs fixed in this release)
 
             ---
-            **Full Changelog**: https://github.com/mimyosa/dmailsender/compare/v0.5...${{ github.ref_name }}
+            **Full Changelog**: https://github.com/mimyosa/dmailsender/compare/v0.6...${{ github.ref_name }}
           files: artifacts/*

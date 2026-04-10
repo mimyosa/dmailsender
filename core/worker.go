@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -63,10 +64,13 @@ func StartSend(
 			if mail.NumberingMailFrom {
 				from = applyNumbering(from, idx)
 			}
-			rcpt := mail.RcptTo
+			rcptList := parseRecipients(mail.RcptTo)
 			if mail.NumberingRcptTo {
-				rcpt = applyNumbering(rcpt, idx)
+				for i, r := range rcptList {
+					rcptList[i] = applyNumbering(r, idx)
+				}
 			}
+			rcpt := strings.Join(rcptList, ", ")
 			subject := mail.Subject
 			if mail.NumberingSubject {
 				subject = applyNumberingSubject(subject, idx)
@@ -175,14 +179,29 @@ func StartSendEML(
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			// Apply numbering for this iteration
+			// Apply numbering for this iteration.
+			//
+			// - useHeaderEnvelope=false (override): apply to UI-provided from/rcpt
+			//   here. Broadcast rcpt is parsed and each recipient is numbered
+			//   individually, then rejoined.
+			// - useHeaderEnvelope=true: pass UI values through unchanged;
+			//   SendEMLRaw will extract header addresses and apply numbering
+			//   to them internally.
 			actualFrom := from
-			if numberingFrom && from != "" {
-				actualFrom = applyNumbering(from, idx)
-			}
 			actualRcpt := rcpt
-			if numberingTo && rcpt != "" {
-				actualRcpt = applyNumbering(rcpt, idx)
+			if !useHeaderEnvelope {
+				if numberingFrom && from != "" {
+					actualFrom = applyNumbering(from, idx)
+				}
+				if rcpt != "" {
+					rcptList := parseRecipients(rcpt)
+					if numberingTo {
+						for i, r := range rcptList {
+							rcptList[i] = applyNumbering(r, idx)
+						}
+					}
+					actualRcpt = strings.Join(rcptList, ", ")
+				}
 			}
 
 			// Wrap onLog with mail index for SMTP log correlation
@@ -191,7 +210,7 @@ func StartSendEML(
 					onLog(direction, fmt.Sprintf("[#%d] %s", idx, line))
 				}
 			}
-			usedFrom, usedTo, err := SendEMLRaw(server, password, actualFrom, actualRcpt, path, useHeaderEnvelope, updateMessageID, customHeaders, indexedLog)
+			usedFrom, usedTo, err := SendEMLRaw(server, password, actualFrom, actualRcpt, path, useHeaderEnvelope, updateMessageID, numberingFrom, numberingTo, idx, customHeaders, indexedLog)
 			// Use the actual addresses returned by SendEMLRaw for accurate logging
 			resultFrom := actualFrom
 			resultTo := actualRcpt
