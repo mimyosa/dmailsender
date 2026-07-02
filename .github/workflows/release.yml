@@ -17,7 +17,7 @@ jobs:
           - os: windows-latest
             artifact: dMailSender-windows-amd64.exe
             build_output: build/bin/dMailSender.exe
-          - os: macos-latest
+          - os: macos-13
             artifact: dMailSender-macos-amd64.zip
             build_output: build/bin/dMailSender.app
           - os: ubuntu-22.04
