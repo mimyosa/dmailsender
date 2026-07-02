@@ -10,7 +10,7 @@ import (
 )
 
 // AppVersion is the current application version.
-const AppVersion = "0.7"
+const AppVersion = "0.8"
 
 // GitHub repository for version checks
 const githubRepo = "mimyosa/dmailsender"
