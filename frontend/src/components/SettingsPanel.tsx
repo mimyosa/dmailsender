@@ -10,10 +10,11 @@ interface Props {
   sendMode: SendMode;
   onChange: (cfg: core.AppConfig) => void;
   onPasswordSaved: () => void;
+  onPendingPassword: (pw: string) => void;
   onClose: () => void;
 }
 
-export default function SettingsPanel({ config, hasPassword, sendMode, onChange, onPasswordSaved, onClose }: Props) {
+export default function SettingsPanel({ config, hasPassword, sendMode, onChange, onPasswordSaved, onPendingPassword, onClose }: Props) {
   const [testing, setTesting] = useState(false);
   const [pwInput, setPwInput] = useState('');
   const server = config.server;
@@ -194,6 +195,18 @@ export default function SettingsPanel({ config, hasPassword, sendMode, onChange,
         {server.auth && (
           <>
             <div className="s-field">
+              <label>AUTH Method</label>
+              <select
+                value={server.auth_type || 'auto'}
+                onChange={(e) => updateServer({ auth_type: e.target.value })}
+              >
+                <option value="auto">기본 (자동 선택)</option>
+                <option value="plain">PLAIN</option>
+                <option value="login">LOGIN</option>
+                <option value="cram-md5">CRAM-MD5</option>
+              </select>
+            </div>
+            <div className="s-field">
               <label>Auth ID</label>
               <input
                 type="text"
@@ -206,11 +219,15 @@ export default function SettingsPanel({ config, hasPassword, sendMode, onChange,
               <input
                 type="password"
                 value={pwInput}
-                onChange={(e) => setPwInput(e.target.value)}
+                onChange={(e) => {
+                  setPwInput(e.target.value);
+                  onPendingPassword(e.target.value);
+                }}
                 onBlur={async () => {
                   if (pwInput && server.auth_id) {
                     await SavePassword(server.auth_id, pwInput);
                     setPwInput('');
+                    onPendingPassword('');
                     onPasswordSaved();
                   }
                 }}
@@ -218,6 +235,7 @@ export default function SettingsPanel({ config, hasPassword, sendMode, onChange,
                   if (e.key === 'Enter' && pwInput && server.auth_id) {
                     await SavePassword(server.auth_id, pwInput);
                     setPwInput('');
+                    onPendingPassword('');
                     onPasswordSaved();
                   }
                 }}

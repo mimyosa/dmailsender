@@ -9,6 +9,7 @@ type ServerConfig struct {
 	TLSVersion string `json:"tls_version"` // "1.0", "1.1", "1.2", "1.3" (default: "1.3")
 	SkipVerify bool   `json:"skip_verify"` // Skip TLS certificate verification (for self-signed certs)
 	Auth       bool   `json:"auth"`
+	AuthType   string `json:"auth_type"` // "auto"(default) | "plain" | "login" | "cram-md5"
 	AuthID     string `json:"auth_id"`
 }
 
@@ -26,9 +27,10 @@ type MailConfig struct {
 	MailNumber        int      `json:"mail_number"`
 	ThreadNumber      int      `json:"thread_number"`
 	IntervalMs        int      `json:"interval_ms"`
-	UseHeaderEnvelope bool     `json:"use_header_envelope"`
-	UpdateMessageID   bool     `json:"update_message_id"`
-	CustomHeaders     []Header `json:"custom_headers"`
+	UseHeaderEnvelope  bool     `json:"use_header_envelope"`
+	UpdateMessageID    bool     `json:"update_message_id"`
+	LenientEMLPreview  bool     `json:"lenient_eml_preview"` // If true, fall back to lenient parser when strict parse fails
+	CustomHeaders      []Header `json:"custom_headers"`
 }
 
 // Header is a custom mail header key-value pair.
@@ -81,11 +83,13 @@ type ProgressEvent struct {
 
 // EMLPreview holds parsed EML data for preview display.
 type EMLPreview struct {
-	Subject     string `json:"subject"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	ContentType string `json:"content_type"`
-	Body        string `json:"body"`
+	Subject       string `json:"subject"`
+	From          string `json:"from"`
+	To            string `json:"to"`
+	ContentType   string `json:"content_type"`
+	Body          string `json:"body"`
+	IsNonStandard bool   `json:"is_non_standard"` // true when strict RFC parsing failed
+	ParseError    string `json:"parse_error"`     // human-readable description of the parse failure
 }
 
 // DefaultConfig returns a sensible default configuration.
@@ -96,6 +100,7 @@ func DefaultConfig() AppConfig {
 			Port:       25,
 			TLSVersion: "1.3",
 			SkipVerify: true,
+			AuthType:   "auto",
 		},
 		Mail: MailConfig{
 			ContentType:  "text/plain",

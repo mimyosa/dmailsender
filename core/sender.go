@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	netmail "net/mail"
 	"net/smtp"
@@ -17,6 +21,8 @@ import (
 
 	gomail "github.com/wneessen/go-mail"
 	gomaillog "github.com/wneessen/go-mail/log"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/transform"
 )
 
 // TestConnection tests TCP connectivity to the SMTP server and optionally TLS handshake.
@@ -174,8 +180,8 @@ type smtpLogger struct {
 	onLog func(direction, line string)
 }
 
-// authMask matches AUTH PLAIN/LOGIN credentials in SMTP log lines and masks them.
-var authMask = regexp.MustCompile(`(?i)(AUTH\s+(?:PLAIN|LOGIN)\s+).+`)
+// authMask matches AUTH PLAIN/LOGIN/CRAM-MD5 credentials in SMTP log lines and masks them.
+var authMask = regexp.MustCompile(`(?i)(AUTH\s+(?:PLAIN|LOGIN|CRAM-MD5)\s+).+`)
 
 func (l *smtpLogger) log(dir string, entry gomaillog.Log) {
 	if l.onLog == nil {
@@ -419,8 +425,23 @@ func SendEMLRaw(server ServerConfig, password string, from, rcpt, emlPath string
 
 	// AUTH
 	if server.Auth && server.AuthID != "" && password != "" {
-		log("client", fmt.Sprintf("AUTH PLAIN %s ****", server.AuthID))
-		auth := smtp.PlainAuth("", server.AuthID, password, server.SMTP)
+		secured := server.SSL || server.TLS
+		mech := normalizeAuthType(server.AuthType)
+		if mech == "auto" {
+			_, advertised := smtpClient.Extension("AUTH")
+			mech = selectAutoMech(advertised, secured)
+			if mech == "" {
+				log("error", fmt.Sprintf("No supported AUTH mechanism (server offers: %s)", advertised))
+				return "", "", fmt.Errorf("AUTH failed: no supported mechanism (server offers: %s)", advertised)
+			}
+			log("info", fmt.Sprintf("Auto-selected AUTH mechanism: %s", strings.ToUpper(mech)))
+		}
+		auth, err := buildSMTPAuth(mech, server.AuthID, password, server.SMTP, secured)
+		if err != nil {
+			log("error", fmt.Sprintf("AUTH setup failed: %v", err))
+			return "", "", fmt.Errorf("AUTH failed: %w", err)
+		}
+		log("client", fmt.Sprintf("AUTH %s %s ****", strings.ToUpper(mech), server.AuthID))
 		if err := smtpClient.Auth(auth); err != nil {
 			log("error", fmt.Sprintf("AUTH failed: %v", err))
 			return "", "", fmt.Errorf("AUTH failed: %w", err)
@@ -578,7 +599,7 @@ func buildClientOpts(server ServerConfig, password string, onLog func(direction,
 	opts = append(opts, gomail.WithPort(server.Port))
 
 	if server.Auth && server.AuthID != "" && password != "" {
-		opts = append(opts, gomail.WithSMTPAuth(gomail.SMTPAuthPlain))
+		opts = append(opts, gomail.WithSMTPAuth(goMailAuthType(server.AuthType)))
 		opts = append(opts, gomail.WithUsername(server.AuthID))
 		opts = append(opts, gomail.WithPassword(password))
 	}
@@ -588,6 +609,140 @@ func buildClientOpts(server ServerConfig, password string, onLog func(direction,
 	}
 
 	return opts
+}
+
+// --- SMTP AUTH mechanism selection ---
+
+// normalizeAuthType canonicalizes a stored auth-type string. Unknown/empty values map to "auto".
+func normalizeAuthType(t string) string {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "plain":
+		return "plain"
+	case "login":
+		return "login"
+	case "cram-md5", "cram", "crammd5":
+		return "cram-md5"
+	default:
+		return "auto"
+	}
+}
+
+// goMailAuthType maps the stored auth-type string to a go-mail SMTPAuthType.
+// "auto" (or unknown) resolves to AutoDiscover, which negotiates the strongest
+// mechanism the server advertises.
+func goMailAuthType(t string) gomail.SMTPAuthType {
+	switch normalizeAuthType(t) {
+	case "plain":
+		return gomail.SMTPAuthPlain
+	case "login":
+		return gomail.SMTPAuthLogin
+	case "cram-md5":
+		return gomail.SMTPAuthCramMD5
+	default:
+		return gomail.SMTPAuthAutoDiscover
+	}
+}
+
+// selectAutoMech picks the best mechanism from the server-advertised AUTH list
+// (as returned by smtpClient.Extension("AUTH")). Preference: CRAM-MD5 > LOGIN > PLAIN.
+// LOGIN and PLAIN require a secured channel (SSL/STARTTLS) because they transmit
+// credentials in cleartext. Returns "" when nothing suitable is available.
+func selectAutoMech(advertised string, secured bool) string {
+	mechs := strings.Fields(strings.ToUpper(advertised))
+	has := func(m string) bool {
+		for _, x := range mechs {
+			if x == m {
+				return true
+			}
+		}
+		return false
+	}
+	if has("CRAM-MD5") {
+		return "cram-md5"
+	}
+	if secured && has("LOGIN") {
+		return "login"
+	}
+	if secured && has("PLAIN") {
+		return "plain"
+	}
+	return ""
+}
+
+// buildSMTPAuth constructs a net/smtp Auth for the given mechanism (used by the EML raw path).
+func buildSMTPAuth(mech, username, password, host string, secured bool) (smtp.Auth, error) {
+	switch mech {
+	case "cram-md5":
+		return smtp.CRAMMD5Auth(username, password), nil
+	case "login":
+		return &loginAuth{username: username, password: password, host: host, secured: secured}, nil
+	case "plain":
+		return &plainAuth{username: username, password: password, host: host, secured: secured}, nil
+	default:
+		return nil, fmt.Errorf("unsupported AUTH mechanism: %s", mech)
+	}
+}
+
+// isLocalhost reports whether the SMTP host name is a loopback address.
+func isLocalhost(name string) bool {
+	return name == "localhost" || name == "127.0.0.1" || name == "::1"
+}
+
+// plainAuth implements the SMTP PLAIN mechanism. Unlike net/smtp.PlainAuth it treats
+// an implicit-SSL connection (secured=true) as encrypted, which the stdlib misses because
+// the TLS state is not tracked when a *tls.Conn is handed to smtp.NewClient directly.
+type plainAuth struct {
+	username, password, host string
+	secured                  bool
+}
+
+func (a *plainAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if !a.secured && !server.TLS && !isLocalhost(server.Name) {
+		return "", nil, errors.New("unencrypted connection")
+	}
+	if server.Name != a.host {
+		return "", nil, errors.New("wrong host name")
+	}
+	resp := []byte("\x00" + a.username + "\x00" + a.password)
+	return "PLAIN", resp, nil
+}
+
+func (a *plainAuth) Next(_ []byte, more bool) ([]byte, error) {
+	if more {
+		return nil, errors.New("unexpected server challenge")
+	}
+	return nil, nil
+}
+
+// loginAuth implements the (non-RFC) SMTP LOGIN mechanism, which net/smtp does not provide.
+// Credentials are sent in cleartext, so a secured channel is required.
+type loginAuth struct {
+	username, password, host string
+	secured                  bool
+}
+
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if !a.secured && !server.TLS && !isLocalhost(server.Name) {
+		return "", nil, errors.New("unencrypted connection")
+	}
+	if server.Name != a.host {
+		return "", nil, errors.New("wrong host name")
+	}
+	return "LOGIN", nil, nil
+}
+
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(string(fromServer))) {
+	case "username:":
+		return []byte(a.username), nil
+	case "password:":
+		return []byte(a.password), nil
+	default:
+		return nil, fmt.Errorf("unexpected LOGIN challenge: %q", string(fromServer))
+	}
 }
 
 // SendOne sends a single mail message according to the given config and index.
@@ -680,18 +835,41 @@ func SendOne(server ServerConfig, password string, mail MailConfig, index int, a
 	return nil
 }
 
-// ParseEMLPreview parses an .eml file and returns a preview (subject, from, to, body).
-func ParseEMLPreview(emlPath string) (EMLPreview, error) {
+// ParseEMLPreview parses an .eml file and returns a preview.
+// When lenient=false (default), strict RFC parsing is used; if it fails, the returned preview
+// has IsNonStandard=true and ParseError set — the caller can retry with lenient=true.
+// When lenient=true, falls back to a raw-bytes parser on strict failure.
+func ParseEMLPreview(emlPath string, lenient bool) (EMLPreview, error) {
+	if _, err := os.Stat(emlPath); err != nil {
+		return EMLPreview{}, fmt.Errorf("EML file not found: %w", err)
+	}
+
+	preview, isNonStandard, strictErr := parseEMLStrict(emlPath)
+	if !isNonStandard {
+		return preview, nil
+	}
+
+	// Strict parse failed — EML is non-standard
+	if lenient {
+		return parseEMLLenient(emlPath), nil
+	}
+
+	// Return metadata about the failure; frontend shows error + force-parse button
+	preview.IsNonStandard = true
+	preview.ParseError = extractParseErrorHint(strictErr)
+	return preview, nil
+}
+
+// parseEMLStrict attempts to parse with go-mail's RFC-conformant parser.
+// Returns (preview, isNonStandard, err). isNonStandard=true means parsing failed.
+func parseEMLStrict(emlPath string) (EMLPreview, bool, error) {
 	preview := EMLPreview{}
 	m, err := gomail.EMLToMsgFromFile(emlPath)
 	if err != nil {
-		return preview, fmt.Errorf("failed to parse EML: %w", err)
+		return preview, true, err
 	}
 
-	// MIME word decoder for encoded headers (e.g., =?UTF-8?B?...?=)
 	dec := new(mime.WordDecoder)
-
-	// Extract headers
 	if addrs := m.GetFromString(); len(addrs) > 0 {
 		preview.From = decodeMIME(dec, strings.Join(addrs, ", "))
 	}
@@ -701,19 +879,247 @@ func ParseEMLPreview(emlPath string) (EMLPreview, error) {
 	if gens := m.GetGenHeader(gomail.HeaderSubject); len(gens) > 0 {
 		preview.Subject = decodeMIME(dec, gens[0])
 	}
-
-	// Extract body from first part
 	parts := m.GetParts()
 	for _, p := range parts {
 		preview.ContentType = string(p.GetContentType())
-		content, err := p.GetContent()
-		if err == nil {
+		if content, err := p.GetContent(); err == nil {
 			preview.Body = string(content)
 		}
 		break
 	}
+	return preview, false, nil
+}
 
-	return preview, nil
+// parseEMLLenient parses an EML file using raw byte operations, tolerating non-standard
+// charsets and malformed Content-Type parameters that strict parsers reject.
+func parseEMLLenient(emlPath string) EMLPreview {
+	preview := EMLPreview{}
+
+	rawBytes, err := os.ReadFile(emlPath)
+	if err != nil {
+		preview.ParseError = fmt.Sprintf("파일 읽기 실패: %v", err)
+		return preview
+	}
+
+	headerBytes, bodyBytes := splitEMLHeaderBody(rawBytes)
+	dec := &mime.WordDecoder{CharsetReader: lenientCharsetReader}
+
+	if v := extractHeaderValue(headerBytes, "From"); v != "" {
+		preview.From = decodeMIMELenient(dec, v)
+	}
+	if v := extractHeaderValue(headerBytes, "To"); v != "" {
+		preview.To = decodeMIMELenient(dec, v)
+	}
+	if v := extractHeaderValue(headerBytes, "Subject"); v != "" {
+		preview.Subject = decodeMIMELenient(dec, v)
+	}
+
+	preview.Body, preview.ContentType = extractBodyLenient(headerBytes, bodyBytes)
+	return preview
+}
+
+// extractParseErrorHint returns a user-readable Korean summary of the parse error.
+func extractParseErrorHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "charset not supported") {
+		return "지원되지 않는 문자셋입니다 (charset not supported): " + msg
+	}
+	if strings.Contains(msg, "invalid media parameter") {
+		return "Content-Type 파라미터 오류입니다 (invalid media parameter): " + msg
+	}
+	return msg
+}
+
+// lenientCharsetReader is a mime.WordDecoder CharsetReader that converts known charsets
+// (iso-2022-jp, euc-jp, shift_jis) to UTF-8. Unknown charsets pass through as-is.
+func lenientCharsetReader(charset string, input io.Reader) (io.Reader, error) {
+	dec := charsetDecoder(charset)
+	if dec == nil {
+		return input, nil
+	}
+	return transform.NewReader(input, dec), nil
+}
+
+// decodeMIMELenient decodes a MIME-encoded header value using a lenient charset reader.
+func decodeMIMELenient(dec *mime.WordDecoder, s string) string {
+	decoded, err := dec.DecodeHeader(s)
+	if err != nil {
+		return s
+	}
+	return decoded
+}
+
+// extractBodyLenient extracts the body content from raw EML header and body bytes.
+// Handles multipart messages, quoted-printable, and base64 transfer encodings.
+func extractBodyLenient(headerBytes, bodyBytes []byte) (content, contentType string) {
+	ctHeader := extractHeaderValue(headerBytes, "Content-Type")
+	te := strings.ToLower(strings.TrimSpace(extractHeaderValue(headerBytes, "Content-Transfer-Encoding")))
+
+	mediaType, params, err := mime.ParseMediaType(ctHeader)
+	if err != nil {
+		// ParseMediaType may still return the correct mediaType even when params are invalid
+		// (e.g., boundary containing '=' which is a tspecial in unquoted tokens).
+		// Keep the returned mediaType if non-empty; extract params manually as fallback.
+		if mediaType == "" {
+			mediaType = extractMediaTypeRaw(ctHeader)
+		}
+		params = map[string]string{
+			"boundary": extractParamRaw(ctHeader, "boundary"),
+			"charset":  extractParamRaw(ctHeader, "charset"),
+		}
+	}
+	if mediaType == "" {
+		mediaType = "text/plain"
+	}
+	contentType = mediaType
+
+	if strings.HasPrefix(mediaType, "multipart/") {
+		boundary := params["boundary"]
+		if boundary == "" {
+			return "[multipart — boundary not found]", contentType
+		}
+		body, ct := extractMultipartText(bodyBytes, boundary)
+		if ct != "" {
+			contentType = ct
+		}
+		return body, contentType
+	}
+
+	// Non-multipart: decode transfer encoding, then convert charset to UTF-8
+	decoded := decodeTransferEncoding(string(bodyBytes), te)
+	return convertToUTF8(decoded, params["charset"]), contentType
+}
+
+// extractMultipartText walks a multipart message and returns the first text/* part.
+// Note: mime/multipart.Part transparently decodes quoted-printable; only base64 is handled manually.
+func extractMultipartText(body []byte, boundary string) (content, contentType string) {
+	mr := multipart.NewReader(bytes.NewReader(body), boundary)
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		partCT := part.Header.Get("Content-Type")
+		partTE := strings.ToLower(strings.TrimSpace(part.Header.Get("Content-Transfer-Encoding")))
+		partMediaType, partParams, _ := mime.ParseMediaType(partCT)
+
+		if strings.HasPrefix(partMediaType, "text/") {
+			data, err := io.ReadAll(part)
+			if err != nil {
+				continue
+			}
+			// mime/multipart.Part auto-decodes QP; apply only base64 manually
+			var decoded string
+			if partTE == "base64" {
+				decoded = decodeTransferEncoding(string(data), "base64")
+			} else {
+				decoded = string(data)
+			}
+			charset := ""
+			if partParams != nil {
+				charset = partParams["charset"]
+			}
+			return convertToUTF8(decoded, charset), partMediaType
+		}
+	}
+	return "[multipart — no text part found]", ""
+}
+
+// convertToUTF8 converts a string from the given charset to UTF-8.
+// Supports iso-2022-jp, euc-jp, shift_jis. Unknown/empty charsets are returned as-is.
+func convertToUTF8(s, charset string) string {
+	if charset == "" || s == "" {
+		return s
+	}
+	dec := charsetDecoder(charset)
+	if dec == nil {
+		return s
+	}
+	out, _, err := transform.String(dec, s)
+	if err != nil {
+		return s
+	}
+	return out
+}
+
+// charsetDecoder returns a transform.Transformer for the given charset name, or nil if unsupported.
+func charsetDecoder(charset string) transform.Transformer {
+	switch strings.ToLower(strings.TrimSpace(charset)) {
+	case "iso-2022-jp":
+		return japanese.ISO2022JP.NewDecoder()
+	case "euc-jp":
+		return japanese.EUCJP.NewDecoder()
+	case "shift_jis", "shift-jis", "sjis", "ms932", "windows-31j":
+		return japanese.ShiftJIS.NewDecoder()
+	default:
+		return nil
+	}
+}
+
+// extractMediaTypeRaw extracts the bare media type (e.g. "multipart/mixed") from a
+// Content-Type string, stopping at the first ';' or whitespace.
+func extractMediaTypeRaw(ct string) string {
+	ct = strings.TrimSpace(ct)
+	if idx := strings.IndexAny(ct, "; \t"); idx >= 0 {
+		return strings.ToLower(ct[:idx])
+	}
+	return strings.ToLower(ct)
+}
+
+// extractParamRaw extracts a named parameter value from a Content-Type string.
+// Works for both quoted ("value") and unquoted values, and tolerates '=' inside values.
+func extractParamRaw(ct, paramName string) string {
+	lower := strings.ToLower(ct)
+	prefix := strings.ToLower(paramName) + "="
+	idx := strings.Index(lower, prefix)
+	if idx < 0 {
+		return ""
+	}
+	val := strings.TrimSpace(ct[idx+len(prefix):])
+	if len(val) == 0 {
+		return ""
+	}
+	// Quoted value
+	if val[0] == '"' {
+		end := strings.Index(val[1:], `"`)
+		if end >= 0 {
+			return val[1 : end+1]
+		}
+		return val[1:]
+	}
+	// Unquoted: read until ';', whitespace, or end of string
+	if end := strings.IndexAny(val, ";\t\r\n "); end >= 0 {
+		return val[:end]
+	}
+	return val
+}
+
+// decodeTransferEncoding decodes quoted-printable or base64 content.
+// Returns the original string if the encoding is unrecognized or decoding fails.
+func decodeTransferEncoding(body, te string) string {
+	switch te {
+	case "quoted-printable":
+		data, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(body)))
+		if err != nil {
+			return body
+		}
+		return string(data)
+	case "base64":
+		cleaned := strings.Join(strings.Fields(body), "")
+		data, err := base64.StdEncoding.DecodeString(cleaned)
+		if err != nil {
+			data, err = base64.RawStdEncoding.DecodeString(cleaned)
+			if err != nil {
+				return body
+			}
+		}
+		return string(data)
+	default:
+		return body
+	}
 }
 
 // decodeMIME decodes MIME-encoded header values (e.g., =?UTF-8?B?...?=).

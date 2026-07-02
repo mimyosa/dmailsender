@@ -391,8 +391,10 @@ func (a *AppService) SelectEMLFiles() ([]string, error) {
 // --- EML Preview ---
 
 // ParseEMLPreview parses an .eml file and returns subject, from, to, body for preview.
-func (a *AppService) ParseEMLPreview(path string) (core.EMLPreview, error) {
-	return core.ParseEMLPreview(path)
+// When lenient=false, strict RFC parsing is used; on failure IsNonStandard=true is set.
+// When lenient=true, a raw-bytes fallback parser is used for non-standard EML files.
+func (a *AppService) ParseEMLPreview(path string, lenient bool) (core.EMLPreview, error) {
+	return core.ParseEMLPreview(path, lenient)
 }
 
 // --- Attachments (Input mode) ---

@@ -47,6 +47,7 @@ export namespace core {
 	    interval_ms: number;
 	    use_header_envelope: boolean;
 	    update_message_id: boolean;
+	    lenient_eml_preview: boolean;
 	    custom_headers: Header[];
 	
 	    static createFrom(source: any = {}) {
@@ -69,6 +70,7 @@ export namespace core {
 	        this.interval_ms = source["interval_ms"];
 	        this.use_header_envelope = source["use_header_envelope"];
 	        this.update_message_id = source["update_message_id"];
+	        this.lenient_eml_preview = source["lenient_eml_preview"];
 	        this.custom_headers = this.convertValues(source["custom_headers"], Header);
 	    }
 	
@@ -98,6 +100,7 @@ export namespace core {
 	    tls_version: string;
 	    skip_verify: boolean;
 	    auth: boolean;
+	    auth_type: string;
 	    auth_id: string;
 	
 	    static createFrom(source: any = {}) {
@@ -113,6 +116,7 @@ export namespace core {
 	        this.tls_version = source["tls_version"];
 	        this.skip_verify = source["skip_verify"];
 	        this.auth = source["auth"];
+	        this.auth_type = source["auth_type"];
 	        this.auth_id = source["auth_id"];
 	    }
 	}
@@ -158,6 +162,8 @@ export namespace core {
 	    to: string;
 	    content_type: string;
 	    body: string;
+	    is_non_standard: boolean;
+	    parse_error: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new EMLPreview(source);
@@ -170,6 +176,8 @@ export namespace core {
 	        this.to = source["to"];
 	        this.content_type = source["content_type"];
 	        this.body = source["body"];
+	        this.is_non_standard = source["is_non_standard"];
+	        this.parse_error = source["parse_error"];
 	    }
 	}
 	

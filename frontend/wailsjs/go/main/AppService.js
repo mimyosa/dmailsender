@@ -42,8 +42,8 @@ export function LoadConfigFrom() {
   return window['go']['main']['AppService']['LoadConfigFrom']();
 }
 
-export function ParseEMLPreview(arg1) {
-  return window['go']['main']['AppService']['ParseEMLPreview'](arg1);
+export function ParseEMLPreview(arg1, arg2) {
+  return window['go']['main']['AppService']['ParseEMLPreview'](arg1, arg2);
 }
 
 export function RemoveAttachment(arg1) {

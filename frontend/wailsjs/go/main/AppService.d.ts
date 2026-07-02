@@ -22,7 +22,7 @@ export function LoadConfig():Promise<core.AppConfig>;
 
 export function LoadConfigFrom():Promise<core.AppConfig>;
 
-export function ParseEMLPreview(arg1:string):Promise<core.EMLPreview>;
+export function ParseEMLPreview(arg1:string,arg2:boolean):Promise<core.EMLPreview>;
 
 export function RemoveAttachment(arg1:number):Promise<Array<string>>;
 

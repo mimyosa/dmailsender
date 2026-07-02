@@ -1,11 +1,12 @@
 module dMailSender
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/wailsapp/wails/v2 v2.11.0
 	github.com/wneessen/go-mail v0.7.2
 	github.com/zalando/go-keyring v0.2.6
+	golang.org/x/text v0.36.0
 )
 
 require (
@@ -37,5 +38,4 @@ require (
 	golang.org/x/crypto v0.33.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
 )

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { core } from '../wailsjs/go/models';
 import {
   LoadConfig,
@@ -18,6 +18,7 @@ import {
   SelectAttachments,
   RemoveAttachment,
   ClearAttachments,
+  SavePassword,
 } from '../wailsjs/go/main/AppService';
 import { EventsOn } from '../wailsjs/runtime/runtime';
 
@@ -56,7 +57,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(true);
   const [sendMode, setSendMode] = useState<'input' | 'eml'>('input');
   const [emlFiles, setEmlFiles] = useState<string[]>([]);
-  const [emlPreview, setEmlPreview] = useState<{ subject: string; from: string; to: string; body: string; content_type: string } | null>(null);
+  const [emlPreview, setEmlPreview] = useState<{ subject: string; from: string; to: string; body: string; content_type: string; is_non_standard: boolean; parse_error: string } | null>(null);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [attachments, setAttachments] = useState<string[]>([]);
   const [statusMessage, setStatusMessage] = useState('');
@@ -65,14 +66,14 @@ function App() {
   const [appVersion, setAppVersion] = useState('');
   const [config, setConfig] = useState<core.AppConfig>(
     new core.AppConfig({
-      server: { smtp: 'localhost', port: 25, tls: false, ssl: false, tls_version: '1.3', skip_verify: true, auth: false, auth_id: '' },
+      server: { smtp: 'localhost', port: 25, tls: false, ssl: false, tls_version: '1.3', skip_verify: true, auth: false, auth_type: 'auto', auth_id: '' },
       mail: {
         mail_from: '', numbering_mail_from: false,
         rcpt_to: '', numbering_rcpt_to: false,
         subject: '', numbering_subject: false, timestamp_subject: false,
         body: '', content_type: 'text/plain',
         mail_number: 1, thread_number: 1, interval_ms: 0,
-        use_header_envelope: false, update_message_id: false,
+        use_header_envelope: false, update_message_id: false, lenient_eml_preview: false,
         custom_headers: [],
       },
       window: { x: 0, y: 0, width: 1024, height: 720 },
@@ -80,6 +81,7 @@ function App() {
     })
   );
   const [hasPassword, setHasPassword] = useState(false);
+  const pendingPwRef = useRef(''); // password typed but not yet saved to keychain
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState<ProgressEvent>({ sent: 0, failed: 0, total: 0 });
   const [results, setResults] = useState<SendResultItem[]>([]);
@@ -195,25 +197,6 @@ function App() {
     setTimeout(() => setSaveMessage(''), 4000);
   };
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey && e.key === 'Enter') || e.key === 'F5') {
-        e.preventDefault();
-        if (!sending) handleStartSend();
-      } else if (e.ctrlKey && e.key === 's') {
-        e.preventDefault();
-        handleSave();
-      } else if (e.ctrlKey && !e.shiftKey && e.key === 'l') {
-        e.preventDefault();
-        if (bottomTab === 'log') handleClearLog();
-        else handleClearResults();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [config, sending, hasPassword, bottomTab]);
-
   const handleSave = useCallback(async () => {
     try {
       await SaveConfig(config);
@@ -267,6 +250,13 @@ function App() {
           setResults((prev) => [...prev, { index: -1, success: false, from: '', to: '', subject: `[Validation] ${msg}`, timestamp: now() }]);
         });
         return;
+      }
+
+      // Save pending password (typed but not yet blur/Enter saved) before sending
+      if (pendingPwRef.current && config.server.auth_id) {
+        await SavePassword(config.server.auth_id, pendingPwRef.current);
+        pendingPwRef.current = '';
+        setHasPassword(true);
       }
 
       // Sync current frontend config to backend (in-memory only, no disk write)
@@ -349,14 +339,32 @@ function App() {
     setProgress({ sent: 0, failed: 0, total: 0 });
   }, []);
 
+  // Keyboard shortcuts — placed after all handlers to avoid stale closure on sendMode
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey && e.key === 'Enter') || e.key === 'F5') {
+        e.preventDefault();
+        if (!sending) handleStartSend();
+      } else if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      } else if (e.ctrlKey && !e.shiftKey && e.key === 'l') {
+        e.preventDefault();
+        if (bottomTab === 'log') handleClearLog();
+        else handleClearResults();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [sending, bottomTab, handleStartSend, handleSave, handleClearLog, handleClearResults]);
+
   const handleSelectEML = async () => {
     try {
       const files = await SelectEMLFiles();
       if (files && files.length > 0) {
         setEmlFiles(files);
-        // Load preview for the first file
         try {
-          const preview = await ParseEMLPreview(files[0]);
+          const preview = await ParseEMLPreview(files[0], config.mail.lenient_eml_preview);
           setEmlPreview(preview);
         } catch {
           setEmlPreview(null);
@@ -364,6 +372,16 @@ function App() {
       }
     } catch (e) {
       console.error('Failed to select EML files:', e);
+    }
+  };
+
+  const handleForceParseLenient = async () => {
+    if (emlFiles.length === 0) return;
+    try {
+      const preview = await ParseEMLPreview(emlFiles[0], true);
+      setEmlPreview(preview);
+    } catch (e) {
+      console.error('Force parse failed:', e);
     }
   };
 
@@ -475,6 +493,7 @@ function App() {
             sendMode={sendMode}
             onChange={setConfig}
             onPasswordSaved={() => setHasPassword(true)}
+            onPendingPassword={(pw) => { pendingPwRef.current = pw; }}
             onClose={() => setSettingsOpen(false)}
           />
         ) : (
@@ -510,27 +529,40 @@ function App() {
               <div className="eml-preview">
                 {emlPreview ? (
                   <>
-                    <div className="eml-preview-header">
-                      <div className="eml-preview-field">
-                        <span className="eml-preview-label">Subject</span>
-                        <span className="eml-preview-value">{emlPreview.subject || '(no subject)'}</span>
+                    {emlPreview.is_non_standard && (
+                      <div className="eml-parse-error">
+                        <span className="eml-parse-error-icon">⚠</span>
+                        <span className="eml-parse-error-msg">비표준 EML — 미리보기 불가: {emlPreview.parse_error}</span>
+                        <button className="btn-force-parse" onClick={handleForceParseLenient}>
+                          강제 파싱으로 보기
+                        </button>
                       </div>
-                      {emlPreview.from && (
-                        <div className="eml-preview-field">
-                          <span className="eml-preview-label">From</span>
-                          <span className="eml-preview-value">{emlPreview.from}</span>
+                    )}
+                    {!emlPreview.is_non_standard && (
+                      <>
+                        <div className="eml-preview-header">
+                          <div className="eml-preview-field">
+                            <span className="eml-preview-label">Subject</span>
+                            <span className="eml-preview-value">{emlPreview.subject || '(no subject)'}</span>
+                          </div>
+                          {emlPreview.from && (
+                            <div className="eml-preview-field">
+                              <span className="eml-preview-label">From</span>
+                              <span className="eml-preview-value">{emlPreview.from}</span>
+                            </div>
+                          )}
+                          {emlPreview.to && (
+                            <div className="eml-preview-field">
+                              <span className="eml-preview-label">To</span>
+                              <span className="eml-preview-value">{emlPreview.to}</span>
+                            </div>
+                          )}
                         </div>
-                      )}
-                      {emlPreview.to && (
-                        <div className="eml-preview-field">
-                          <span className="eml-preview-label">To</span>
-                          <span className="eml-preview-value">{emlPreview.to}</span>
+                        <div className="eml-preview-body">
+                          <textarea readOnly value={emlPreview.body || '(empty body)'} />
                         </div>
-                      )}
-                    </div>
-                    <div className="eml-preview-body">
-                      <textarea readOnly value={emlPreview.body || '(empty body)'} />
-                    </div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <div className="eml-preview-empty">
@@ -572,6 +604,22 @@ function App() {
                         setConfig(new core.AppConfig({
                           ...config,
                           mail: new core.MailConfig({ ...config.mail, update_message_id: e.target.checked }),
+                        }))
+                      }
+                    />
+                    <span className="slider" />
+                  </label>
+                </div>
+                <div className="s-toggle">
+                  <span>Lenient EML Parsing</span>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={config.mail.lenient_eml_preview}
+                      onChange={(e) =>
+                        setConfig(new core.AppConfig({
+                          ...config,
+                          mail: new core.MailConfig({ ...config.mail, lenient_eml_preview: e.target.checked }),
                         }))
                       }
                     />
