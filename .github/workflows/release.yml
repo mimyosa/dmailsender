@@ -17,8 +17,8 @@ jobs:
           - os: windows-latest
             artifact: dMailSender-windows-amd64.exe
             build_output: build/bin/dMailSender.exe
-          - os: macos-13
-            artifact: dMailSender-macos-amd64.zip
+          - os: macos-14
+            artifact: dMailSender-macos-arm64.zip
             build_output: build/bin/dMailSender.app
           - os: ubuntu-22.04
             artifact: dMailSender-linux-amd64
@@ -38,7 +38,16 @@ jobs:
           node-version: '20'
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        shell: bash
+        run: |
+          # On macOS (arm64) the Go internal linker can omit the LC_UUID load
+          # command, which newer macOS dyld refuses to run (Abort trap: 6).
+          # Force the external linker via cgo so LC_UUID is emitted.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            CGO_ENABLED=1 go install -ldflags=-linkmode=external github.com/wailsapp/wails/v2/cmd/wails@latest
+          else
+            go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          fi
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -85,32 +94,22 @@ jobs:
           body: |
             ## What's New in ${{ github.ref_name }}
 
-            ### Broadcast Mail (동보메일)
-            - **Multiple recipients in To field** — Comma or semicolon separated addresses are now parsed into individual RCPT TO commands, supported in both Input and EML modes
-            - **Per-recipient numbering** — `#Num` option now applies to each recipient individually (previously broken for broadcast lists)
+            ### EML Preview Robustness
+            - **Non-standard EML support** — Strict RFC parsing runs first; when it fails, a "Force parse" button and an opt-in "Lenient EML Parsing" toggle fall back to a tolerant raw-bytes parser
+            - **Correct body decoding** — Fixed quoted-printable double-decoding in multipart bodies, and manual parsing of Content-Type boundaries containing `=` (common in Outlook/Exchange messages)
+            - **Charset conversion** — `iso-2022-jp` / `euc-jp` / `shift_jis` bodies and headers are converted to UTF-8 in the preview
 
-            ### Numbering Logic Rewritten
-            - **Simpler, predictable behavior** — Numbering no longer uses regex-based digit replacement; it always appends `-{N}` to the end
-              - Email: `user@example.com` → `user-5@example.com`, `user001@example.com` → `user001-5@example.com`
-              - Subject: `Report 2024` → `Report 2024-5` (years, versions, domain digits fully preserved)
-            - **Domain/IP safe** — `user@jiran2.com`, `user@192.168.1.1`, unicode local parts all handled correctly
-            - **NUM + Timestamp ordering** — Combined form is `{subject}-{N} ({timestamp})`
-
-            ### EML Mode Improvements
-            - **Numbering works with "Use Header Envelope"** — Previously silently ignored when the header envelope mode was active; now numbering is applied to the addresses extracted from the EML headers and logged to SMTP Log for traceability
-            - **EML override path broadcast + numbering fix** — The override path now parses broadcast lists and applies numbering per-recipient
-
-            ### UI
-            - **Dark/Light mode readability** — Added `color-scheme` declaration for proper WebView2 form element theming, adjusted secondary/muted text colors in dark mode (brighter) and primary/secondary/muted in light mode (darker) for improved contrast
-            - **To field placeholder** — Updated to indicate multiple recipients are supported
-            - **Ctrl+L clears the active bottom tab** — Previously only cleared the SMTP Log tab regardless of which tab was focused; now it clears whichever tab is currently active (Results or SMTP Log), with the `activeTab` state lifted to App level
+            ### SMTP AUTH Mechanism Selection
+            - **Choose AUTH method** — `Auto` / `PLAIN` / `LOGIN` / `CRAM-MD5`. `Auto` negotiates the strongest mechanism the server advertises
+            - **Implicit-SSL AUTH fix** — AUTH is no longer incorrectly rejected on implicit-SSL (port 465) connections
 
             ### Bug Fixes
-            - **SSL/TLS port override fix** — In SSL/TLS mode, the configured port was being forcibly overridden to 465 because `WithPort` was called before `WithSSLPort` in go-mail option ordering; fixed by reordering so `WithPort` is applied last
+            - **Send mode after switching** — Fixed the first send after switching Input/EML mode using the previous mode (stale closure in the keyboard-shortcut handler)
+            - **Unsaved password on send** — A newly typed password is now saved to the keychain before sending, even when triggered via F5 / Send button without leaving the field
 
-            ### Tests
-            - **72 edge case tests added** — Numbering, broadcast parsing, subject composition, EML header envelope numbering (including display names, IPv4 literal domains, unicode, multi-recipient headers, and regression cases for all bugs fixed in this release)
+            ### CI
+            - **macOS runner** — Build on `macos-14` (Apple Silicon / arm64); install the Wails CLI with the external linker so the binary carries an `LC_UUID` load command required by recent macOS dyld
 
             ---
-            **Full Changelog**: https://github.com/mimyosa/dmailsender/compare/v0.6...${{ github.ref_name }}
+            **Full Changelog**: https://github.com/mimyosa/dmailsender/compare/v0.7...${{ github.ref_name }}
           files: artifacts/*
